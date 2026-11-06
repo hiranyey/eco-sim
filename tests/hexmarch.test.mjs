@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { newGame, addUnit } from '../js/world.js';
 import {
   beginTurn, endTurn, currentFaction, reachable, combatPreview, attack, moveUnit, recruit, trade, quote, unitAt, cityAt,
-  declareWar, offerPeace, relation, citiesOf, income,
+  declareWar, offerPeace, relation, citiesOf, income, setResearch, techAvailable, adoptPolicy, dropPolicy, policySlots,
+  unitCost,
 } from '../js/rules.js';
 import { aiTurn } from '../js/ai.js';
 import { resolveEvent, eventView } from '../js/events.js';
@@ -133,3 +134,49 @@ for (const seed of ['g1', 'g2', 'g3', 'g4', 'g5', 'g6']) {
     assert.deepEqual(copy, s);
   });
 }
+
+test('research ladders, lore banking and tech effects', () => {
+  const s = newGame({ seed: 'lore', playerFaction: 0 });
+  const f = s.factions[0];
+  assert.equal(techAvailable(s, 0, 'longbow'), false, 'tier 2 needs tier 1');
+  assert.equal(typeof setResearch(s, 0, 'longbow'), 'string');
+  const lore = income(s, 0).lore;
+  assert.ok(lore >= 2, 'a capital makes lore');
+  f.lore = 30; // banked lore completes research the moment it is chosen
+  const r = setResearch(s, 0, 'rotation');
+  assert.equal(r.done, 'rotation');
+  assert.equal(f.lore, 18);
+  assert.ok(techAvailable(s, 0, 'coinage'));
+  const before = income(s, 0);
+  f.lore = 100;
+  assert.equal(setResearch(s, 0, 'coinage').done, 'coinage');
+  assert.equal(income(s, 0).gold, before.gold + citiesOf(s, 0).length);
+  // Drill Yards raises defence, which the combat preview reflects.
+  const a = addUnit(s, 'militia', 1, 50);
+  const d = addUnit(s, 'spear', 0, 51);
+  declareWar(s, 1, 0);
+  const p0 = combatPreview(s, a, d);
+  f.techs.push('drill');
+  const p1 = combatPreview(s, a, d);
+  assert.ok(p1.dmg <= p0.dmg && p1.ret >= p0.ret && (p1.dmg < p0.dmg || p1.ret > p0.ret));
+});
+
+test('policies use slots and cost gold', () => {
+  const s = newGame({ seed: 'policy', playerFaction: 0 });
+  const f = s.factions[0];
+  f.gold = 50;
+  assert.equal(policySlots(s, 0), 1);
+  assert.equal(typeof adoptPolicy(s, 0, 'warcode'), 'string', 'locked until Drill Yards');
+  const militia = unitCost(s, 0, 'militia').gold;
+  assert.equal(typeof adoptPolicy(s, 0, 'conscription'), 'object');
+  assert.equal(f.gold, 45);
+  assert.equal(unitCost(s, 0, 'militia').gold, Math.max(1, militia - 2));
+  assert.equal(typeof adoptPolicy(s, 0, 'tithes'), 'string', 'no free slot');
+  f.techs.push('laws');
+  assert.equal(policySlots(s, 0), 2);
+  const g = income(s, 0);
+  adoptPolicy(s, 0, 'tithes');
+  assert.equal(income(s, 0).gold, g.gold + citiesOf(s, 0).length);
+  dropPolicy(s, 0, 'conscription');
+  assert.deepEqual(f.policies, ['tithes']);
+});

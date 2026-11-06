@@ -3,6 +3,7 @@ import { rand, randInt } from './rng.js';
 import { neighbors, distance, within } from './hex.js';
 import {
   W, H, TERRAIN, UNITS, CITY_LEVELS, UPGRADE_COST, BUILDINGS, GOODS, RENOWN_TO_WIN, TURN_LIMIT, DIFFICULTY,
+  TECHS, POLICIES, POLICY_COST,
 } from './data.js';
 import { addUnit, maxHp, newCharacter } from './world.js';
 import { rollEvent } from './events.js';
@@ -18,6 +19,8 @@ export const hasTrait = (s, fid, t) => !!rulerOf(s, fid)?.traits.includes(t);
 export const capitalOf = (s, fid) => s.cities.find((c) => c.owner === fid && c.capital) ?? null;
 export const currentFaction = (s) => s.order[s.current];
 export const territoryOwner = (s, tile) => (s.tiles[tile].city >= 0 ? s.cities[s.tiles[tile].city].owner : null);
+export const hasTech = (s, fid, t) => fid >= 0 && !!s.factions[fid].techs?.includes(t);
+export const hasPolicy = (s, fid, p) => fid >= 0 && !!s.factions[fid].policies?.includes(p);
 export const relation = (s, a, b) => s.relations[a < b ? `${a}-${b}` : `${b}-${a}`];
 
 export function addRenown(s, fid, n, src) {
@@ -46,6 +49,7 @@ export function movePoints(s, u) {
   let m = UNITS[u.type].move;
   if (u.type === 'cavalry' && u.owner >= 0 && s.factions[u.owner].key === 'ashkar') m += 1;
   if (u.type === 'ruler' && hasTrait(s, u.owner, 'tactician')) m += 1;
+  if (u.type === 'knight' && hasTech(s, u.owner, 'stirrups')) m += 1;
   return m;
 }
 
@@ -103,9 +107,24 @@ export function pathTo(reach, from, to) {
 }
 
 // ---------- combat ----------
+// Base attack/defence after research (shown on unit cards).
+export function baseAtk(s, owner, type) {
+  let a = UNITS[type].atk;
+  if (type === 'archer' && hasTech(s, owner, 'longbow')) a += 1;
+  if (type === 'cavalry' && hasTech(s, owner, 'stirrups')) a += 1;
+  if (type === 'catapult' && hasTech(s, owner, 'trebuchet')) a += 1;
+  return a;
+}
+export function baseDef(s, owner, type) {
+  let d = UNITS[type].def;
+  if ((type === 'militia' || type === 'spear') && hasTech(s, owner, 'drill')) d += 1;
+  return d;
+}
+
 function attackStat(s, att, def, fromTile) {
   const A = UNITS[att.type];
-  let a = A.atk;
+  let a = baseAtk(s, att.owner, att.type);
+  if (hasPolicy(s, att.owner, 'warcode')) a *= 1.15;
   if (att.type === 'ruler' && hasTrait(s, att.owner, 'brave')) a += 1;
   if (A.antiMounted && UNITS[def.type].mounted) a *= 1.5;
   if (att.type !== 'ruler' && att.owner >= 0) {
@@ -117,7 +136,7 @@ function attackStat(s, att, def, fromTile) {
 
 export function defenseBonus(s, u, tile = u.tile) {
   const c = cityAt(s, tile);
-  if (c && (c.owner === u.owner)) return c.buildings.includes('walls') ? 2 : 1.5;
+  if (c && (c.owner === u.owner)) return c.buildings.includes('walls') || hasPolicy(s, u.owner, 'bastions') ? 2 : 1.5;
   const t = s.tiles[tile].t;
   if (t === 'forest' && u.owner >= 0 && s.factions[u.owner].key === 'thorne') return 1.5;
   return TERRAIN[t].def;
@@ -125,14 +144,14 @@ export function defenseBonus(s, u, tile = u.tile) {
 
 function defenseStat(s, def, att) {
   const D = UNITS[def.type];
-  let d = D.def;
+  let d = baseDef(s, def.owner, def.type);
   if (D.antiMounted && UNITS[att.type].mounted) d *= 1.5;
   return d * defenseBonus(s, def);
 }
 
 export function canAttack(s, u) {
   if (u.attacked || u.owner < 0) return false;
-  if (UNITS[u.type].siege && u.moved) return false;
+  if (UNITS[u.type].siege && u.moved && !hasTech(s, u.owner, 'trebuchet')) return false;
   return true;
 }
 
@@ -288,6 +307,7 @@ export function succession(s, fid, cause) {
     f.rulerId = heir.id;
     f.heirId = null;
     revolt = cause === 'battle' ? 0.2 : 0.05;
+    if (hasTech(s, fid, 'primogeniture')) revolt /= 2;
     log(s, `👑 ${heir.name} (age ${heir.age}) succeeds ${old.name} as head of ${f.name}.`, fid === s.playerId ? 'info' : 'world');
   } else {
     f.rulerId = newCharacter(s, randInt(s, 24, 40));
@@ -295,6 +315,7 @@ export function succession(s, fid, cause) {
     log(s, `👑 ${old.name} died without an heir! A distant cousin, ${s.characters[f.rulerId].name}, seizes power in ${f.name}.`, fid === s.playerId ? 'bad' : 'world');
   }
   if (hasTrait(s, fid, 'beloved')) revolt = 0;
+  if (f.heirId == null && hasTech(s, fid, 'primogeniture')) f.heirId = newCharacter(s, randInt(s, 8, 16));
   for (const c of citiesOf(s, fid)) {
     if (c.capital || rand(s) >= revolt) continue;
     c.owner = -1;
@@ -322,6 +343,7 @@ export function unitCost(s, fid, type, city = null) {
   if (key === 'varr' && (type === 'spear' || type === 'knight')) c.iron = Math.max(0, (c.iron ?? 0) - 1);
   if (key === 'thorne' && type === 'archer') c.gold -= 2;
   if (key === 'ashkar' && type === 'cavalry') c.gold -= 1;
+  if ((type === 'militia' || type === 'spear') && hasPolicy(s, fid, 'conscription')) c.gold = Math.max(1, c.gold - 2);
   if (city?.buildings.includes('barracks')) c.gold = Math.max(1, c.gold - 1);
   return c;
 }
@@ -329,6 +351,7 @@ export function unitCost(s, fid, type, city = null) {
 function discounted(s, fid, cost) {
   const c = { ...cost };
   if (hasTrait(s, fid, 'builder')) c.gold = Math.ceil(c.gold * 0.75);
+  if (hasTech(s, fid, 'architecture')) for (const k of Object.keys(c)) c[k] = Math.ceil(c[k] * 0.75);
   return c;
 }
 export const upgradeCost = (s, fid, city) => discounted(s, fid, UPGRADE_COST[city.level + 1] ?? {});
@@ -420,14 +443,21 @@ export function tileYield(s, tile) {
 
 export function income(s, fid) {
   const f = s.factions[fid];
-  const out = { gold: 0, grain: 0, timber: 0, iron: 0, upkeep: 0 };
-  for (const c of citiesOf(s, fid)) {
+  const out = { gold: 0, grain: 0, timber: 0, iron: 0, lore: 0, upkeep: 0 };
+  const has = (t) => hasTech(s, fid, t);
+  const pol = (p) => hasPolicy(s, fid, p);
+  const cs = citiesOf(s, fid);
+  for (const c of cs) {
     const L = CITY_LEVELS[c.level];
     out.gold += L.gold + (c.capital ? 2 : 0) + (c.capital && f.key === 'selene' ? 2 : 0);
+    out.lore += c.level + (c.capital ? 1 + (has('bureaucracy') ? 2 : 0) : 0);
     if (c.capital) out.grain += 2;
-    if (c.buildings.includes('market')) out.gold += f.key === 'selene' ? 5 : 3;
+    if (has('rotation')) out.grain += 1;
+    if (has('coinage')) out.gold += 1;
+    if (c.buildings.includes('market')) out.gold += (f.key === 'selene' ? 5 : 3) + (has('guilds') ? 2 : 0) + (pol('freetrade') ? 2 : 0);
     if (c.buildings.includes('granary')) out.grain += 3;
-    if (c.buildings.includes('workshop')) { out.timber += 1; out.iron += 1; }
+    if (c.buildings.includes('library')) out.lore += 2;
+    if (c.buildings.includes('workshop')) { const w = has('guilds') ? 2 : 1; out.timber += w; out.iron += w; }
     for (const t of within(W, H, c.tile, 1)) {
       if (s.tiles[t].city !== c.id) continue;
       out[tileYield(s, t)] += L.tileYield;
@@ -435,16 +465,88 @@ export function income(s, fid) {
   }
   if (hasTrait(s, fid, 'greedy')) out.gold += 2;
   if (f.ai) out.gold = Math.round(out.gold * (DIFFICULTY[s.difficulty]?.aiGold ?? 1));
-  out.upkeep = unitsOf(s, fid).filter((u) => u.type !== 'ruler').length;
+  const soldiers = unitsOf(s, fid).filter((u) => u.type !== 'ruler').length;
+  out.upkeep = pol('rations') ? Math.ceil((soldiers * 2) / 3) : soldiers;
+  if (pol('tithes')) { out.gold += cs.length; out.grain -= cs.length; }
+  if (pol('conscription')) out.lore -= 2;
+  if (pol('patronage')) { out.lore = Math.floor(out.lore * 1.5); out.gold -= 3; }
+  if (pol('warcode')) out.gold -= Math.floor(soldiers / 3);
+  if (pol('bastions')) out.gold -= cs.length;
+  if (pol('pilgrimage')) out.gold -= 2;
+  out.lore = Math.max(0, out.lore);
   return out;
 }
 
+// Renown earned at the start of each turn: { shrines, building }.
+export function renownSources(s, fid) {
+  const out = { shrines: 0, building: 0 };
+  const per = (hasTrait(s, fid, 'pious') ? 2 : 1) + (hasTech(s, fid, 'divine') ? 1 : 0) + (hasPolicy(s, fid, 'pilgrimage') ? 1 : 0);
+  for (const u of unitsOf(s, fid)) if (s.tiles[u.tile].shrine) out.shrines += per;
+  for (const c of citiesOf(s, fid)) if (c.buildings.includes('cathedral')) out.building += 1 + (hasPolicy(s, fid, 'pilgrimage') ? 1 : 0);
+  return out;
+}
 export function renownIncome(s, fid) {
-  let r = 0;
-  const per = hasTrait(s, fid, 'pious') ? 2 : 1;
-  for (const u of unitsOf(s, fid)) if (s.tiles[u.tile].shrine) r += per;
-  for (const c of citiesOf(s, fid)) if (c.buildings.includes('cathedral')) r += 1;
-  return r;
+  const r = renownSources(s, fid);
+  return r.shrines + r.building;
+}
+
+// ---------- research & policies ----------
+export function techAvailable(s, fid, key) {
+  const T = TECHS[key];
+  if (!T || hasTech(s, fid, key)) return false;
+  return T.tier === 1 || Object.entries(TECHS).some(([k, x]) => x.branch === T.branch && x.tier === T.tier - 1 && hasTech(s, fid, k));
+}
+
+export function setResearch(s, fid, key) {
+  const f = s.factions[fid];
+  if (key != null && !techAvailable(s, fid, key)) return 'Not available yet';
+  f.research = key;
+  const done = progressResearch(s, fid);
+  return { type: 'research', done };
+}
+
+// Completes the current tech if enough lore is banked. Returns the finished tech key or null.
+export function progressResearch(s, fid) {
+  const f = s.factions[fid];
+  if (!f.research) return null;
+  const T = TECHS[f.research];
+  if (f.lore < T.cost) return null;
+  const key = f.research;
+  f.lore -= T.cost;
+  f.techs.push(key);
+  f.research = null;
+  if (T.renown) addRenown(s, fid, T.renown, 'research');
+  if (key === 'primogeniture' && f.heirId == null) f.heirId = newCharacter(s, randInt(s, 8, 16));
+  log(s, `📜 ${f.short} masters ${T.name}.${T.renown ? ` (+${T.renown} renown)` : ''}`, fid === s.playerId ? 'good' : 'world');
+  checkVictory(s);
+  return key;
+}
+
+export function policySlots(s, fid) {
+  return 1 + (hasTech(s, fid, 'laws') ? 1 : 0) + (hasTech(s, fid, 'bureaucracy') ? 1 : 0);
+}
+
+export function policyAvailable(s, fid, key) {
+  const P = POLICIES[key];
+  return !!P && (!P.req || hasTech(s, fid, P.req));
+}
+
+export function adoptPolicy(s, fid, key) {
+  const f = s.factions[fid];
+  if (!policyAvailable(s, fid, key)) return `Requires ${TECHS[POLICIES[key]?.req]?.name ?? 'research'}`;
+  if (f.policies.includes(key)) return 'Already adopted';
+  if (f.policies.length >= policySlots(s, fid)) return 'No free policy slot. Drop a policy first';
+  if (f.gold < POLICY_COST) return `Need ${POLICY_COST} gold`;
+  f.gold -= POLICY_COST;
+  f.policies.push(key);
+  return { type: 'policy' };
+}
+
+export function dropPolicy(s, fid, key) {
+  const f = s.factions[fid];
+  if (!f.policies.includes(key)) return 'Not adopted';
+  f.policies = f.policies.filter((p) => p !== key);
+  return { type: 'policy' };
 }
 
 // ---------- market ----------
@@ -452,6 +554,7 @@ export function spread(s, fid) {
   let sp = 0.15;
   if (s.factions[fid].key === 'selene') sp = 0.05;
   if (hasTrait(s, fid, 'shrewd')) sp -= 0.05;
+  if (hasPolicy(s, fid, 'freetrade')) sp -= 0.08;
   return Math.max(0.02, sp);
 }
 
@@ -563,6 +666,9 @@ export function beginTurn(s, fid) {
   f.grain += inc.grain - inc.upkeep;
   f.timber += inc.timber;
   f.iron += inc.iron;
+  f.lore += inc.lore;
+  if (f.gold < 0) f.gold = 0;
+  progressResearch(s, fid);
   if (f.grain < 0) {
     f.grain = 0;
     let lost = 0;
@@ -573,9 +679,9 @@ export function beginTurn(s, fid) {
     }
     log(s, `🍞 ${f.short}'s armies go hungry! Every soldier loses 2 HP${lost ? `; ${lost} unit(s) desert` : ''}.`, fid === s.playerId ? 'bad' : 'info');
   }
-  const per = hasTrait(s, fid, 'pious') ? 2 : 1;
-  for (const u of unitsOf(s, fid)) if (s.tiles[u.tile].shrine) addRenown(s, fid, per, 'shrines');
-  for (const c of citiesOf(s, fid)) if (c.buildings.includes('cathedral')) addRenown(s, fid, 1, 'building');
+  const rn = renownSources(s, fid);
+  if (rn.shrines) addRenown(s, fid, rn.shrines, 'shrines');
+  if (rn.building) addRenown(s, fid, rn.building, 'building');
   rollEvent(s, fid);
   checkVictory(s);
 }

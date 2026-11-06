@@ -43,6 +43,7 @@ export const BUILDINGS = {
   granary: { name: 'Granary', cost: { gold: 10, timber: 4 }, desc: '+3 grain per turn' },
   workshop: { name: 'Workshop', cost: { gold: 10, timber: 4 }, desc: '+1 timber and +1 iron per turn' },
   barracks: { name: 'Barracks', cost: { gold: 10, timber: 4 }, desc: 'Recruit 2 units per turn here, each 1 gold cheaper' },
+  library: { name: 'Library', cost: { gold: 8, timber: 4 }, desc: '+2 lore per turn for research' },
   walls: { name: 'Walls', cost: { gold: 10, timber: 5 }, desc: 'Defenders here get ×2 defence instead of ×1.5' },
   cathedral: { name: 'Cathedral', cost: { gold: 40, timber: 15, iron: 8 }, minLevel: 3, desc: 'A grand work, one per realm: +4 renown now and +1 every turn' },
 };
@@ -80,3 +81,39 @@ export const GIVEN = ['Aldric', 'Brenna', 'Cassian', 'Dorin', 'Elsa', 'Fenwick',
 export const PLACE_A = ['Ash', 'Bel', 'Cor', 'Dun', 'El', 'Fen', 'Gal', 'Har', 'Kel', 'Lun', 'Mor', 'Nor', 'Ost', 'Pel', 'Rav', 'Sel',
   'Tor', 'Ul', 'Val', 'Wen', 'Bry', 'Cael', 'Eir', 'Gwyn', 'Thal', 'Brin', 'Stone', 'Oak', 'Mill', 'Crow'];
 export const PLACE_B = ['ford', 'mere', 'vale', 'holm', 'stead', 'wick', 'by', 'ton', 'burg', 'moor', 'fell', 'brook', 'crest', 'haven', 'gate', 'reach'];
+
+// ---------- research ----------
+// Towns produce lore (📜): 1 per town level, +1 at the capital, +2 with a Library.
+// Each branch is a ladder: a tech needs the one before it. Lore can be banked while nothing is being studied.
+export const BRANCHES = {
+  war: { name: 'Warfare', icon: '⚔' },
+  econ: { name: 'Economy', icon: '⚖' },
+  state: { name: 'Statecraft', icon: '👑' },
+};
+export const TECHS = {
+  drill: { name: 'Drill Yards', branch: 'war', tier: 1, cost: 12, desc: 'Militia and Spearmen +1 defence' },
+  longbow: { name: 'Longbows', branch: 'war', tier: 2, cost: 24, desc: 'Archers +1 attack' },
+  stirrups: { name: 'Stirrups', branch: 'war', tier: 3, cost: 38, desc: 'Cavalry +1 attack, Knights +1 move' },
+  trebuchet: { name: 'Trebuchets', branch: 'war', tier: 4, cost: 55, renown: 4, desc: 'Catapults +1 attack and can fire after moving. +4 renown' },
+  rotation: { name: 'Crop Rotation', branch: 'econ', tier: 1, cost: 12, desc: '+1 grain per town' },
+  coinage: { name: 'Coinage', branch: 'econ', tier: 2, cost: 24, desc: '+1 gold per town' },
+  guilds: { name: 'Guilds', branch: 'econ', tier: 3, cost: 38, desc: 'Workshops give +1 more timber and iron; Markets +2 gold' },
+  architecture: { name: 'Architecture', branch: 'econ', tier: 4, cost: 55, renown: 4, desc: 'Upgrades and buildings cost 25% less. +4 renown' },
+  laws: { name: 'Code of Laws', branch: 'state', tier: 1, cost: 12, desc: '+1 policy slot' },
+  primogeniture: { name: 'Primogeniture', branch: 'state', tier: 2, cost: 24, desc: 'An heir is always at hand; succession revolts are halved' },
+  bureaucracy: { name: 'Bureaucracy', branch: 'state', tier: 3, cost: 38, desc: '+1 policy slot; capital +2 lore' },
+  divine: { name: 'Divine Right', branch: 'state', tier: 4, cost: 55, renown: 4, desc: 'Shrines give +1 extra renown per turn. +4 renown' },
+};
+
+// Policies fill slots (1 to start). Adopting one costs gold; dropping one is free.
+export const POLICY_COST = 5;
+export const POLICIES = {
+  tithes: { name: 'Tithes', desc: '+1 gold per town, but −1 grain per town' },
+  conscription: { name: 'Conscription', desc: 'Militia and Spearmen cost 2 less gold, but −2 lore per turn' },
+  patronage: { name: 'Patronage of Scholars', desc: '+50% lore, but −3 gold per turn' },
+  rations: { name: 'Field Rations', req: 'rotation', desc: 'Soldiers eat a third less grain' },
+  warcode: { name: 'Warrior Code', req: 'drill', desc: 'All your units +15% attack, but −1 gold per 3 soldiers' },
+  freetrade: { name: 'Free Trade', req: 'coinage', desc: 'Better market prices; Markets +2 gold' },
+  bastions: { name: 'Bastion Towns', req: 'laws', desc: 'Every town defends as if walled, but −1 gold per town' },
+  pilgrimage: { name: 'Pilgrimages', req: 'bureaucracy', desc: '+1 renown per turn for each shrine you hold and for your cathedral, but −2 gold per turn' },
+};

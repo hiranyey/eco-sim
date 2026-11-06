@@ -2,12 +2,14 @@
 import { newGame } from './world.js';
 import {
   UNITS, RECRUITABLE, BUILDINGS, GOODS, TERRAIN, TRAITS, FACTIONS, DIFFICULTY, RENOWN_TO_WIN, TURN_LIMIT, CITY_LEVELS,
+  TECHS, BRANCHES, POLICIES, POLICY_COST,
 } from './data.js';
 import {
   unitAt, cityAt, citiesOf, reachable, pathTo, attackTargets, combatPreview, moveUnit, attack, recruit,
   upgradeCity, build, trade, quote, income, unitCost, upgradeCost, buildingCost, canAfford, relation, declareWar,
   offerPeace, peaceTerms, strength, endTurn, beginTurn, currentFaction, canAttack, readyUnits, hostile, defenseBonus,
-  recruitLimit, renownIncome, movePoints, threatTiles, recruitSpot,
+  recruitLimit, renownIncome, movePoints, threatTiles, recruitSpot, baseAtk, baseDef, techAvailable, setResearch,
+  policySlots, policyAvailable, adoptPolicy, dropPolicy,
 } from './rules.js';
 import { aiTurn } from './ai.js';
 import { eventView, resolveEvent } from './events.js';
@@ -84,6 +86,7 @@ function mountGame(s) {
           <nav class="tabs">
             <button data-act="tab" data-v="select">Selection</button>
             <button data-act="tab" data-v="market">Market</button>
+            <button data-act="tab" data-v="research">Research</button>
             <button data-act="tab" data-v="court">Court</button>
             <button data-act="tab" data-v="log">Chronicle</button>
           </nav>
@@ -131,18 +134,26 @@ function renderBar() {
     r('💰', f.gold, inc.gold, 'Gold: recruits, upgrades and buildings') +
     r('🌾', f.grain, net, `Grain: each soldier eats 1 per turn (${inc.grain} grown, ${inc.upkeep} eaten). If it runs out, soldiers starve.`, f.grain + net < 0) +
     r('🪵', f.timber, inc.timber, 'Timber: archers, catapults, upgrades and buildings') +
-    r('⛏', f.iron, inc.iron, 'Iron: spearmen, cavalry, knights');
+    r('⛏', f.iron, inc.iron, 'Iron: spearmen, cavalry, knights') +
+    loreChip(f, inc.lore);
   root.querySelector('.race').innerHTML = s.factions.map((x) => `
     <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown">
       <span class="nm">${esc(x.short)}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
     </div>`).join('');
 }
 
+function loreChip(f, gain) {
+  const T = f.research ? TECHS[f.research] : null;
+  const idle = !T && Object.keys(TECHS).some((k) => techAvailable(ui.s, ui.s.playerId, k));
+  const title = T ? `Researching ${T.name}: ${f.lore}/${T.cost} lore` : idle ? 'Nothing being researched: lore is banked. Click to choose.' : 'Lore';
+  return `<button class="r lore${idle ? ' idle' : ''}" data-act="tab" data-v="research" title="${esc(title)}"><span>📜</span><b>${T ? `${Math.min(f.lore, T.cost)}/${T.cost}` : f.lore}</b><small class="pos">+${gain}</small>${T ? `<i class="lore-bar"><i style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></i></i>` : ''}</button>`;
+}
+
 // ---------------------------------------------------------------- side panes
 function renderPane() {
   root.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === ui.tab));
   const pane = root.querySelector('.pane');
-  const html = { select: paneSelect, market: paneMarket, court: paneCourt, log: paneLog }[ui.tab]();
+  const html = { select: paneSelect, market: paneMarket, research: paneResearch, court: paneCourt, log: paneLog }[ui.tab]();
   if (pane.dataset.html !== html) {
     const top = pane.scrollTop;
     pane.innerHTML = html;
@@ -153,7 +164,7 @@ function renderPane() {
 
 function statLine(u) {
   const U = UNITS[u.type];
-  return `<div class="stats"><span title="Attack">⚔ ${U.atk}</span><span title="Defence">🛡 ${U.def}</span><span title="Movement">🥾 ${movePoints(ui.s, u)}</span><span title="Range">🎯 ${U.range}</span></div>`;
+  return `<div class="stats"><span title="Attack">⚔ ${baseAtk(ui.s, u.owner, u.type)}</span><span title="Defence">🛡 ${baseDef(ui.s, u.owner, u.type)}</span><span title="Movement">🥾 ${movePoints(ui.s, u)}</span><span title="Range">🎯 ${U.range}</span></div>`;
 }
 
 function unitCard(u) {
@@ -224,7 +235,7 @@ function cityCard(c) {
     const ok = can && left > 0 && !blocked && canAfford(f, cost);
     const U = UNITS[t];
     out += `<button class="rec" data-act="recruit" data-v="${c.id}" data-u="${t}" ${ok ? '' : 'disabled'} title="${esc(U.desc)}">
-      ${iconSvg(t, s.factions[s.playerId].color)}<b>${U.name}</b><small>⚔${U.atk} 🛡${U.def} 🥾${U.move}${U.range > 1 ? ` 🎯${U.range}` : ''} ❤${U.hp}</small><span>${costHtml(cost)}</span></button>`;
+      ${iconSvg(t, s.factions[s.playerId].color)}<b>${U.name}</b><small>⚔${baseAtk(s, s.playerId, t)} 🛡${baseDef(s, s.playerId, t)} 🥾${U.move + (t === 'knight' && f.techs.includes('stirrups') ? 1 : 0) + (t === 'cavalry' && f.key === 'ashkar' ? 1 : 0)}${U.range > 1 ? ` 🎯${U.range}` : ''} ❤${U.hp}</small><span>${costHtml(cost)}</span></button>`;
   }
   out += '</div></div>';
   return out;
@@ -241,6 +252,7 @@ function goals() {
     ['Recruit a unit (click your town)', t.recruited],
     ['Stand on a shrine ✦ for renown', (f.stats.renown.shrines ?? 0) > 0],
     ['Grow a town or add a building', f.stats.built > 0],
+    ['Pick something to research (📜)', f.research != null || f.techs.length > 0],
   ];
   if (list.every(([, d]) => d) || s.turn > 15) return '';
   return `<div class="card goals"><b>Early goals</b>${list.map(([txt, d]) => `<div class="goal ${d ? 'done' : ''}"><span>${d ? '✔' : '○'}</span>${txt}</div>`).join('')}</div>`;
@@ -337,6 +349,51 @@ function paneCourt() {
     <div class="card"><b>${esc(FACTIONS[s.playerId].bonus)}</b><p class="muted small">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
     <div class="small">Renown: <b>${f.renown}</b> / ${RENOWN_TO_WIN}${rn ? ` · +${rn} per turn from shrines and cathedrals` : ''}</div></div>
     <h4>The other houses</h4>${rows}`;
+}
+
+function paneResearch() {
+  const s = ui.s;
+  const f = me();
+  const fid = s.playerId;
+  const can = myTurn();
+  const inc = income(s, fid);
+  const T = f.research ? TECHS[f.research] : null;
+  const turnsLeft = (cost) => (f.lore >= cost ? 'now' : inc.lore > 0 ? `${Math.ceil((cost - f.lore) / inc.lore)} turns` : 'never');
+  let out = `<div class="card research-now">
+    <div class="row"><b>📜 Lore ${f.lore}</b><span class="muted small">+${inc.lore} per turn</span></div>
+    ${T ? `<div class="small">Researching <b>${T.name}</b> · ${Math.min(f.lore, T.cost)}/${T.cost} · done in ${turnsLeft(T.cost)}</div>
+      <div class="hpbar lore"><span style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></span></div>`
+    : '<div class="small">Nothing being researched. Lore is banked until you choose.</div>'}
+    <p class="muted small">Every town makes lore equal to its level, the capital +1, a Library +2. Each branch is a ladder: master one step to unlock the next. You won't have time for everything.</p></div>`;
+  out += '<div class="tree">';
+  for (const [bk, B] of Object.entries(BRANCHES)) {
+    out += `<div class="branch"><h4>${B.icon} ${B.name}</h4>`;
+    for (const [k, X] of Object.entries(TECHS).filter(([, x]) => x.branch === bk).sort((a, b) => a[1].tier - b[1].tier)) {
+      const done = f.techs.includes(k);
+      const avail = techAvailable(s, fid, k);
+      const cur = f.research === k;
+      const unlocks = Object.values(POLICIES).filter((p) => p.req === k).map((p) => p.name);
+      out += `<button class="tech ${done ? 'done' : cur ? 'cur' : avail ? 'avail' : 'locked'}" data-act="research" data-v="${k}" ${can && avail && !cur ? '' : 'disabled'}>
+        <b>${done ? '✓ ' : cur ? '▶ ' : ''}${X.name}</b><small>${esc(X.desc)}</small>
+        ${unlocks.length ? `<small class="unlock">Unlocks policy: ${unlocks.join(', ')}</small>` : ''}
+        ${done ? '' : `<span class="cost">📜${X.cost}${avail && !cur ? ` · ${turnsLeft(X.cost)}` : ''}</span>`}</button>`;
+    }
+    out += '</div>';
+  }
+  out += '</div>';
+  const slots = policySlots(s, fid);
+  out += `<h4>Policies <span class="muted">${f.policies.length}/${slots} slots</span></h4>
+    <p class="muted small">Adopting a policy costs ${POLICY_COST} gold. Dropping one is free. More slots come from Code of Laws and Bureaucracy.</p><div class="policies">`;
+  for (const [k, P] of Object.entries(POLICIES)) {
+    const on = f.policies.includes(k);
+    const avail = policyAvailable(s, fid, k);
+    const full = f.policies.length >= slots;
+    const btn = on ? `<button class="ghost small" data-act="droppol" data-v="${k}" ${can ? '' : 'disabled'}>Drop</button>`
+      : avail ? `<button class="small" data-act="adopt" data-v="${k}" ${can && !full && f.gold >= POLICY_COST ? '' : 'disabled'} title="${full ? 'No free slot: drop a policy first' : ''}">Adopt <small>−${POLICY_COST}💰</small></button>`
+        : `<span class="muted small">Needs ${TECHS[P.req].name}</span>`;
+    out += `<div class="policy ${on ? 'on' : avail ? '' : 'locked'}"><div><b>${on ? '✓ ' : ''}${P.name}</b><small>${esc(P.desc)}</small></div>${btn}</div>`;
+  }
+  return `${out}</div>`;
 }
 
 function paneLog() {
@@ -532,6 +589,9 @@ async function onClick(e) {
     case 'recruit': r(recruit(s, fid, +b.dataset.v, b.dataset.u), () => { sfx.build(); s.tut = { ...(s.tut ?? {}), recruited: true }; }); break;
     case 'upgrade': r(upgradeCity(s, fid, +b.dataset.v), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
     case 'build': r(build(s, fid, +b.dataset.v, b.dataset.b), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
+    case 'research': r(setResearch(s, fid, b.dataset.v), () => { sfx.build(); s.tut = { ...(s.tut ?? {}), researched: true }; }); break;
+    case 'adopt': r(adoptPolicy(s, fid, b.dataset.v), () => sfx.coin()); break;
+    case 'droppol': r(dropPolicy(s, fid, b.dataset.v)); break;
     case 'trade': r(trade(s, fid, b.dataset.g, +b.dataset.n, b.dataset.side), () => sfx.coin()); break;
     case 'askwar': ui.confirmWar = +b.dataset.v; render(); break;
     case 'nowar': ui.confirmWar = null; render(); break;
@@ -702,6 +762,7 @@ function showHelp(first) {
       <div><b>★ Renown</b><p>Claim free towns (+2), seize rival towns (+4, capitals +8), stand on a shrine <span class="gold">✦</span> (+1 each turn), win battles (+1, a ruler +4), grow towns to level 3 (+2), raise a cathedral (+4 and +1 each turn).</p></div>
       <div><b>⚔ Units</b><p>Click a unit: blue hexes are where it can go, red rings are enemies it can hit. <b>Hover an enemy for the exact outcome</b>: every fight is predictable. Forests and hills end your move but defend well. Moving next to an enemy stops you (zone of control).</p></div>
       <div><b>🏰 Towns</b><p>Click your town to recruit (one unit per turn, two with Barracks), grow it, and add buildings. Each soldier eats 1 grain per turn. Run out and your army starves.</p></div>
+      <div><b>📜 Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
       <div><b>⚖ Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
       <div><b>⭐ Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
       <div><b>⚠ Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
@@ -792,7 +853,11 @@ function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ign
 function loadSave() {
   try {
     const d = localStorage.getItem(SAVE_KEY);
-    return d ? JSON.parse(d) : null;
+    const s = d ? JSON.parse(d) : null;
+    for (const f of s?.factions ?? []) {
+      f.lore ??= 0; f.techs ??= []; f.policies ??= []; f.research ??= null;
+    }
+    return s;
   } catch { return null; }
 }
 

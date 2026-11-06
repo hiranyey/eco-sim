@@ -2,11 +2,12 @@
 // so the UI can animate it before asking for the next.
 import { rand } from './rng.js';
 import { neighbors, distance } from './hex.js';
-import { W, H, TERRAIN, UNITS, GOODS, RENOWN_TO_WIN } from './data.js';
+import { W, H, TERRAIN, UNITS, GOODS, RENOWN_TO_WIN, TECHS, POLICIES, POLICY_COST } from './data.js';
 import {
   unitAt, cityAt, citiesOf, unitsOf, hostile, relation, reachable, combatPreview, canAttack, defenseBonus,
   moveUnit, attack, recruit, upgradeCity, build, trade, income, unitCost, upgradeCost, buildingCost, canAfford,
   strength, declareWar, makePeace, territoryOwner, atWarWith, capitalOf, recruitLimit,
+  techAvailable, setResearch, policySlots, policyAvailable, adoptPolicy, dropPolicy, renownSources,
 } from './rules.js';
 import { trigger } from './events.js';
 
@@ -163,6 +164,7 @@ function develop(s, fid, reserve) {
       if (inc.grain - inc.upkeep < 2) wants.push('granary');
       if (c.capital) wants.push('market');
       if (atWarWith(s, fid).length && !c.capital) wants.push('walls');
+      if (c.level >= 2 && !cs.some((x) => x.buildings.includes('library'))) wants.push('library');
       wants.push('workshop', 'market', 'barracks', 'granary');
       const b = wants.find((x) => !c.buildings.includes(x));
       if (b && canAfford(f, { ...buildingCost(s, fid, b), gold: buildingCost(s, fid, b).gold + reserve })) build(s, fid, c.id, b);
@@ -250,9 +252,44 @@ function diplomacy(s, fid) {
   }
 }
 
+const LEANING = { varr: 'war', selene: 'econ', thorne: 'state', ashkar: 'war' };
+
+function scholarship(s, fid) {
+  const f = s.factions[fid];
+  if (!f.research) {
+    const opts = Object.keys(TECHS).filter((k) => techAvailable(s, fid, k));
+    let best = null;
+    for (const k of opts) {
+      const T = TECHS[k];
+      const v = -T.cost + (T.branch === LEANING[f.key] ? 6 : 0) + rand(s) * 8;
+      if (!best || v > best.v) best = { k, v };
+    }
+    if (best) setResearch(s, fid, best.k);
+  }
+  const inc = income(s, fid);
+  const wars = atWarWith(s, fid).length;
+  if (f.policies.includes('tithes') && inc.grain - inc.upkeep < 0 && f.grain < 8) dropPolicy(s, fid, 'tithes');
+  if (f.policies.includes('patronage') && inc.gold < 4) dropPolicy(s, fid, 'patronage');
+  if (f.policies.length >= policySlots(s, fid) || f.gold < POLICY_COST + 8) return;
+  const soldiers = unitsOf(s, fid).filter((u) => u.type !== 'ruler').length;
+  const cs = citiesOf(s, fid);
+  const wants = [];
+  if (wars) wants.push('warcode');
+  if (renownSources(s, fid).shrines >= 2) wants.push('pilgrimage');
+  if (soldiers >= 7) wants.push('rations');
+  if (wars && cs.length >= 4 && inc.gold > cs.length + 6) wants.push('bastions');
+  if (cs.some((c) => c.buildings.includes('market'))) wants.push('freetrade');
+  if (inc.grain - inc.upkeep >= cs.length + 2) wants.push('tithes');
+  if (inc.gold >= 9) wants.push('patronage');
+  wants.push('conscription', 'tithes');
+  const pick = wants.find((p) => POLICIES[p] && policyAvailable(s, fid, p) && !f.policies.includes(p));
+  if (pick) adoptPolicy(s, fid, pick);
+}
+
 export function* aiTurn(s, fid) {
   if (!s.factions[fid].alive || s.winner) return;
   diplomacy(s, fid);
+  scholarship(s, fid);
   economy(s, fid);
   const reserve = atWarWith(s, fid).length ? 12 : 4;
   develop(s, fid, reserve);
