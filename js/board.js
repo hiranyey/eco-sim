@@ -1,26 +1,16 @@
 // SVG game board: static terrain plus dynamic layers for territory, towns, units, highlights and effects.
 import { center, corners, mapSize, neighborDir, HEX } from './hex.js';
-import { TERRAIN, REBEL_COLOR } from './data.js';
+import { REBEL_COLOR, UNITS } from './data.js';
 import { maxHp } from './world.js';
+import { paintTerrain } from './art/painter.js';
+import { EMBLEM, townSprite, ribbon, shrineSprite, shade } from './art/sprites.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const pts = (cs) => cs.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const hash = (i, k = 0) => {
-  let h = (i * 374761393 + k * 668265263) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-};
 
-export const ICONS = {
-  militia: '<path d="M0,-7V7M-4.5,-7V-3.5Q-4.5,-1 0,-1Q4.5,-1 4.5,-3.5V-7" class="ic-stroke"/>',
-  spear: '<path d="M-5,7L5,-5M-2,-1L1,2" class="ic-stroke"/><path d="M7,-7L2.5,-5.5L5.5,-2.5Z" class="ic-fill"/>',
-  archer: '<path d="M-2,-7.5Q7,0 -2,7.5" class="ic-stroke"/><path d="M-2,-7.5V7.5" class="ic-thin"/><path d="M-7,0H5" class="ic-stroke"/><path d="M7,0L3.5,-2.5V2.5Z" class="ic-fill"/>',
-  cavalry: '<path d="M-5,7L-5,1Q-6,-3 -2,-6L1,-8L1.5,-5.5Q6,-4.5 6.5,0L4.5,1.5L1.5,-0.5L1,2L3,7Z" class="ic-fill"/>',
-  knight: '<path d="M-6,-6.5H6V0Q6,5.5 0,8Q-6,5.5 -6,0Z" class="ic-fill"/><path d="M0,-4.5V5M-3.5,-1H3.5" class="ic-cross"/>',
-  catapult: '<circle cx="-3.5" cy="4.5" r="2.6" class="ic-stroke"/><circle cx="4" cy="4.5" r="2.6" class="ic-stroke"/><path d="M-6,1.5H7M-1,1.5L5,-7" class="ic-stroke"/><circle cx="5.5" cy="-7" r="2" class="ic-fill"/>',
-  ruler: '<path d="M-7.5,5V-4L-3.5,0L0,-7L3.5,0L7.5,-4V5Z" class="ic-fill"/>',
-};
+// Unit emblems live in art/sprites.js; re-exported for the UI.
+export const ICONS = EMBLEM;
 
 export function createBoard(svg, handlers) {
   let s = null;
@@ -39,19 +29,27 @@ export function createBoard(svg, handlers) {
     units.clear();
     const [w, h] = mapSize(s.W, s.H);
     svg.setAttribute('viewBox', `0 0 ${w.toFixed(0)} ${h.toFixed(0)}`);
+    const owners = [...s.factions.map((f) => [f.id, f.color]), [-1, REBEL_COLOR]];
     svg.innerHTML = `<defs>
-      <radialGradient id="shrineGlow"><stop offset="0" stop-color="#fff3b0" stop-opacity="0.95"/><stop offset="0.5" stop-color="#ffd35a" stop-opacity="0.45"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
-      <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.2" flood-color="#000" flood-opacity="0.55"/></filter>
+      <radialGradient id="shrineGlow"><stop offset="0" stop-color="#fff3b0" stop-opacity="0.9"/><stop offset="0.5" stop-color="#ffd35a" stop-opacity="0.35"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
+      <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0.6" dy="2" stdDeviation="1.4" flood-color="#0a0604" flood-opacity="0.6"/></filter>
+      <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+      <linearGradient id="rim-steel" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#f4f1ea"/><stop offset="0.45" stop-color="#a7a39b"/><stop offset="1" stop-color="#3f3b36"/></linearGradient>
+      <linearGradient id="rim-gold" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff4c2"/><stop offset="0.45" stop-color="#e0aa3e"/><stop offset="1" stop-color="#6d4710"/></linearGradient>
+      <linearGradient id="rim-sel" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#ffe9a8"/></linearGradient>
+      <radialGradient id="gloss" cx="0.35" cy="0.2" r="0.75"><stop offset="0" stop-color="#fff" stop-opacity="0.45"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.06"/><stop offset="1" stop-color="#000" stop-opacity="0.25"/></radialGradient>
+      ${owners.map(([id, c]) => `<radialGradient id="tok${id}" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="${shade(c, 0.28)}"/><stop offset="0.65" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -0.45)}"/></radialGradient>`).join('')}
     </defs>`;
     layers = {};
-    for (const name of ['terrain', 'deco', 'tint', 'borders', 'hl', 'sites', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
-    // Static terrain
+    for (const name of ['terrain', 'grid', 'tint', 'borders', 'hl', 'sites', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
+    const art = paintTerrain(s);
+    el('image', { href: art.url, x: 0, y: 0, width: art.width, height: art.height, preserveAspectRatio: 'none' }, layers.terrain);
     for (let i = 0; i < s.tiles.length; i++) {
       const [cx, cy] = center(s.W, i);
-      const t = s.tiles[i].t;
-      el('polygon', { points: pts(corners(cx, cy, HEX + 0.6)), class: `tile t-${t}`, fill: TERRAIN[t].color, 'data-tile': i }, layers.terrain);
-      drawDeco(i, t, cx, cy);
+      el('polygon', { points: pts(corners(cx, cy, HEX)), class: `tile t-${s.tiles[i].t}`, 'data-tile': i }, layers.grid);
     }
+    el('rect', { x: 1.5, y: 1.5, width: art.width - 3, height: art.height - 3, rx: 3, class: 'frame-outer' }, layers.grid);
+    el('rect', { x: 5, y: 5, width: art.width - 10, height: art.height - 10, rx: 2, class: 'frame-inner' }, layers.grid);
     svg.onclick = (e) => {
       const t = tileFromEvent(e);
       if (t != null) handlers.onTileClick(t, e);
@@ -78,40 +76,7 @@ export function createBoard(svg, handlers) {
     return bd <= HEX * HEX ? best : null;
   }
 
-  function drawDeco(i, t, cx, cy) {
-    const g = layers.deco;
-    if (t === 'forest') {
-      for (let k = 0; k < 3; k++) {
-        const x = cx + (hash(i, k) - 0.5) * 30;
-        const y = cy + (hash(i, k + 7) - 0.5) * 22;
-        el('path', { d: `M${x},${y - 9}L${x + 6},${y + 4}L${x - 6},${y + 4}Z`, class: 'tree' }, g);
-        el('path', { d: `M${x},${y + 4}V${y + 7}`, class: 'trunk' }, g);
-      }
-    } else if (t === 'hills') {
-      for (let k = 0; k < 2; k++) {
-        const x = cx + (k ? 8 : -9) + (hash(i, k) - 0.5) * 6;
-        const y = cy + (k ? 6 : -2);
-        el('path', { d: `M${x - 10},${y + 3}Q${x},${y - 11} ${x + 10},${y + 3}`, class: 'hill' }, g);
-      }
-    } else if (t === 'mountain') {
-      el('path', { d: `M${cx - 18},${cy + 12}L${cx - 4},${cy - 14}L${cx + 9},${cy + 12}Z`, class: 'peak' }, g);
-      el('path', { d: `M${cx - 2},${cy + 12}L${cx + 9},${cy - 6}L${cx + 20},${cy + 12}Z`, class: 'peak2' }, g);
-      el('path', { d: `M${cx - 4},${cy - 14}L${cx - 9},${cy - 5}L${cx - 4},${cy - 7}L${cx},${cy - 5}Z`, class: 'snow' }, g);
-    } else if (t === 'water') {
-      for (let k = 0; k < 2; k++) {
-        const x = cx - 10 + hash(i, k) * 6;
-        const y = cy - 6 + k * 11;
-        el('path', { d: `M${x},${y}q4,-3 8,0t8,0`, class: 'wave' }, g);
-      }
-    } else if (t === 'plains') {
-      for (let k = 0; k < 4; k++) {
-        const x = cx + (hash(i, k) - 0.5) * 34;
-        const y = cy + (hash(i, k + 3) - 0.5) * 26;
-        el('path', { d: `M${x},${y}l-1.5,-4M${x},${y}l1.5,-4`, class: 'grass' }, g);
-      }
-    }
-  }
-
+  const escapeXml = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const colorOf = (owner) => (owner < 0 ? REBEL_COLOR : s.factions[owner].color);
 
   function render(ui) {
@@ -120,18 +85,26 @@ export function createBoard(svg, handlers) {
     layers.tint.innerHTML = '';
     layers.borders.innerHTML = '';
     const ownerOf = (i) => (s.tiles[i].city >= 0 ? s.cities[s.tiles[i].city].owner : null);
+    const edges = new Map();
     for (let i = 0; i < s.tiles.length; i++) {
       const o = ownerOf(i);
       if (o == null) continue;
       const [cx, cy] = center(s.W, i);
-      el('polygon', { points: pts(corners(cx, cy, HEX)), fill: colorOf(o), class: 'tint' }, layers.tint);
-      const cs = corners(cx, cy, HEX - 2.2);
+      el('polygon', { points: pts(corners(cx, cy, HEX + 0.4)), fill: colorOf(o), class: `tint${o < 0 ? ' free' : ''}` }, layers.tint);
+      const cs = corners(cx, cy, HEX - 2.4);
       for (let k = 0; k < 6; k++) {
         const n = neighborDir(s.W, s.H, i, k);
         if (n >= 0 && ownerOf(n) === o) continue;
         const [a, b] = [cs[k], cs[(k + 1) % 6]];
-        el('path', { d: `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`, stroke: colorOf(o), class: 'border' }, layers.borders);
+        const d = `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`;
+        if (!edges.has(o)) edges.set(o, []);
+        edges.get(o).push(d);
       }
+    }
+    for (const [o, ds] of edges) {
+      const d = ds.join('');
+      el('path', { d, class: 'border-under' }, layers.borders);
+      el('path', { d, stroke: colorOf(o), class: `border${o < 0 ? ' free' : ''}` }, layers.borders);
     }
     // Towns and shrines
     layers.sites.innerHTML = '';
@@ -139,8 +112,10 @@ export function createBoard(svg, handlers) {
       if (!t.shrine) return;
       const [cx, cy] = center(s.W, i);
       const holder = s.units.find((u) => u.tile === i);
-      el('circle', { cx, cy, r: 26, fill: 'url(#shrineGlow)', class: 'shrine-glow' }, layers.sites);
-      el('path', { d: star(cx, cy - 1, 11, 4.5), class: `shrine${holder && holder.owner >= 0 ? ' held' : ''}`, style: holder && holder.owner >= 0 ? `--c:${colorOf(holder.owner)}` : '' }, layers.sites);
+      const held = holder && holder.owner >= 0;
+      el('circle', { cx, cy, r: 30, fill: 'url(#shrineGlow)', class: 'shrine-glow' }, layers.sites);
+      const g = el('g', { class: `shrine${held ? ' held' : ''}`, transform: `translate(${cx},${cy})` }, layers.sites);
+      g.innerHTML = shrineSprite(held ? colorOf(holder.owner) : null);
     });
     for (const c of s.cities) drawCity(c);
     // Highlights
@@ -170,31 +145,10 @@ export function createBoard(svg, handlers) {
     renderUnits(ui);
   }
 
-  function star(cx, cy, R, r) {
-    let p = '';
-    for (let k = 0; k < 10; k++) {
-      const a = (Math.PI / 5) * k - Math.PI / 2;
-      const rad = k % 2 ? r : R;
-      p += `${k ? 'L' : 'M'}${(cx + rad * Math.cos(a)).toFixed(1)},${(cy + rad * Math.sin(a)).toFixed(1)}`;
-    }
-    return `${p}Z`;
-  }
-
   function drawCity(c) {
     const [cx, cy] = center(s.W, c.tile);
-    const g = el('g', { class: `town lvl${c.level}`, transform: `translate(${cx},${cy})`, style: `--c:${colorOf(c.owner)}` }, layers.sites);
-    const towers = c.level === 1 ? [0] : c.level === 2 ? [-8, 8] : [-12, 0, 12];
-    el('rect', { x: -15, y: 2, width: 30, height: 10, rx: 1.5, class: 'wall' }, g);
-    for (const x of towers) {
-      const tall = x === 0 || c.level === 2 ? 14 : 10;
-      el('rect', { x: x - 4.5, y: 12 - tall - 8, width: 9, height: tall + 8, class: 'tower' }, g);
-      el('path', { d: `M${x - 4.5},${12 - tall - 8}v-3h3v2h3v-2h3v3`, class: 'tower' }, g);
-    }
-    el('path', { d: `M${towers[towers.length >> 1]},${-14 - (c.level - 1) * 2}v-10l9,3.5l-9,3.5`, class: 'flag' }, g);
-    if (c.capital) el('path', { d: star(-14, -14, 5, 2.2), class: 'capital' }, g);
-    if (c.buildings.includes('cathedral')) el('path', { d: 'M13,-15v-8M10,-20h6', class: 'cathedral' }, g);
-    const label = el('text', { x: 0, y: 25, class: 'town-name', 'text-anchor': 'middle' }, g);
-    label.textContent = c.name;
+    const g = el('g', { class: `town lvl${c.level}`, transform: `translate(${cx},${cy - 4})` }, layers.sites);
+    g.innerHTML = townSprite(c, colorOf(c.owner)) + ribbon(escapeXml(c.name), colorOf(c.owner), 28);
   }
 
   function placeUnit(gEl, tile, instant = false) {
@@ -214,17 +168,25 @@ export function createBoard(svg, handlers) {
       let g = units.get(u.id);
       if (!g) {
         g = el('g', { class: 'unit spawn' }, layers.units);
-        g.innerHTML = `<g class="tok" filter="url(#shadow)"><circle r="15.5" class="ring"/><circle r="13" class="body"/><g class="icon">${ICONS[u.type]}</g></g>
-          <rect x="-12" y="15" width="24" height="4" rx="2" class="hpbg"/><rect x="-12" y="15" width="24" height="4" rx="2" class="hp"/><circle cx="11" cy="-11" r="3.6" class="ready"/><path d="M-11,-16l1.4,2.9 3.2,0.4-2.3,2.2 0.6,3.1-2.9-1.5-2.9,1.5 0.6-3.1-2.3-2.2 3.2-0.4z" class="vet"/>`;
+        g.innerHTML = `<ellipse class="foot" cx="0" cy="13.5" rx="12" ry="3.6"/>
+          <g class="tok" filter="url(#shadow)"><circle r="16" class="rim"/><circle r="13.4" class="body"/><circle r="13.4" fill="url(#gloss)" class="gloss"/><g class="icon">${EMBLEM[u.type]}</g></g>
+          <rect x="-12.5" y="16.5" width="25" height="5" rx="2.5" class="hpbg"/><rect x="-11.5" y="17.5" width="23" height="3" rx="1.5" class="hp"/>
+          <g class="ready"><circle cx="12" cy="-12" r="4.4"/><path d="M10,-12.2l1.5,1.6 2.6,-3"/></g>
+          <path d="M-12,-17l1.5,3.1 3.4,0.5-2.5,2.4 0.6,3.4-3-1.6-3,1.6 0.6-3.4-2.5-2.4 3.4-0.5z" class="vet"/>`;
         units.set(u.id, g);
         placeUnit(g, u.tile, true);
         setTimeout(() => g.classList.remove('spawn'), 400);
       }
       if (!g.dataset.anim) placeUnit(g, u.tile);
       g.style.setProperty('--c', colorOf(u.owner));
+      const body = g.querySelector('.body');
+      if (body.dataset.owner !== String(u.owner)) {
+        body.dataset.owner = String(u.owner);
+        body.setAttribute('fill', `url(#tok${u.owner})`);
+      }
       const frac = Math.max(0, u.hp / maxHp(s, u.type, u.owner, u.vet));
       const hp = g.querySelector('.hp');
-      hp.setAttribute('width', (24 * frac).toFixed(1));
+      hp.setAttribute('width', (23 * frac).toFixed(1));
       hp.setAttribute('class', `hp ${frac < 0.35 ? 'low' : frac < 0.7 ? 'mid' : ''}`);
       const mine = u.owner === s.playerId;
       const ready = mine && ui.myTurn && ((!u.moved) || (!u.attacked && ui.canAttackFn?.(u)));
@@ -268,6 +230,9 @@ export function createBoard(svg, handlers) {
       await sleep(95 * speed);
       g.style.transform = `translate(${ax}px, ${ay}px)`;
     }
+    if (UNITS[s.units.find((u) => u.id === res.uid)?.type]?.range > 1 || Math.hypot(tx - ax, ty - ay) > HEX * 2.2) {
+      await projectile(ax, ay, tx, ty, Math.max(160, 220 * speed));
+    } else slash(tx, ty);
     if (tg) {
       tg.classList.add('hit');
       setTimeout(() => tg.classList.remove('hit'), 300);
@@ -287,6 +252,45 @@ export function createBoard(svg, handlers) {
         await sleep(110 * speed);
       }
     }
+  }
+
+  async function projectile(ax, ay, tx, ty, ms) {
+    const ang = (Math.atan2(ty - ay, tx - ax) * 180) / Math.PI;
+    const g = el('g', { class: 'missile' }, layers.fx);
+    g.innerHTML = '<path d="M-9,0H6" class="shaft"/><path d="M9,0L4,-2.6V2.6Z" class="head"/><path d="M-9,0l-2.5,-2.5M-9,0l-2.5,2.5" class="fletch"/>';
+    const t0 = performance.now();
+    await new Promise((done) => {
+      const tick = (now) => {
+        const k = Math.min(1, (now - t0) / ms);
+        const x = ax + (tx - ax) * k;
+        const y = ay + (ty - ay) * k - Math.sin(k * Math.PI) * 26;
+        const slope = Math.cos(k * Math.PI) * -26 * Math.PI;
+        const a2 = ang + (Math.atan2(slope, Math.hypot(tx - ax, ty - ay) || 1) * 180) / Math.PI * 0.6;
+        g.setAttribute('transform', `translate(${x},${y}) rotate(${a2})`);
+        if (k < 1) requestAnimationFrame(tick); else done();
+      };
+      requestAnimationFrame(tick);
+    });
+    g.remove();
+    burst(tx, ty);
+  }
+
+  function slash(x, y) {
+    const g = el('g', { class: 'slash', transform: `translate(${x},${y})` }, layers.fx);
+    g.innerHTML = '<path d="M-13,-11Q2,-4 12,12"/><path d="M-6,-14Q6,-6 14,6" class="thin"/>';
+    burst(x, y);
+    setTimeout(() => g.remove(), 420);
+  }
+
+  function burst(x, y) {
+    const g = el('g', { class: 'burst', transform: `translate(${x},${y})` }, layers.fx);
+    let d = '';
+    for (let k = 0; k < 8; k++) {
+      const a = (Math.PI / 4) * k + 0.3;
+      d += `M${(Math.cos(a) * 6).toFixed(1)},${(Math.sin(a) * 6).toFixed(1)}L${(Math.cos(a) * 14).toFixed(1)},${(Math.sin(a) * 14).toFixed(1)}`;
+    }
+    g.innerHTML = `<path d="${d}"/>`;
+    setTimeout(() => g.remove(), 450);
   }
 
   function float(tile, text, cls = '') {

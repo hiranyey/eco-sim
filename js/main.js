@@ -13,7 +13,9 @@ import {
 } from './rules.js';
 import { aiTurn } from './ai.js';
 import { eventView, resolveEvent } from './events.js';
-import { createBoard, ICONS } from './board.js';
+import { createBoard } from './board.js';
+import { tokenSvg, crest, townSprite } from './art/sprites.js';
+import { icon, iconize } from './art/icons.js';
 import { maxHp } from './world.js';
 import { sfx, isMuted, setMuted } from './audio.js';
 
@@ -30,8 +32,8 @@ const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p
 const SPEEDS = { normal: 1, fast: 0.5, instant: 0 };
 
 const costHtml = (cost) => Object.entries(cost).filter(([, v]) => v > 0)
-  .map(([k, v]) => `<span class="cost">${k === 'gold' ? '💰' : GOODS[k].icon}${v}</span>`).join('');
-const iconSvg = (type, color) => `<svg class="mini-unit" viewBox="-16 -16 32 32" style="--c:${color}"><circle r="15" class="body"/><g class="icon">${ICONS[type]}</g></svg>`;
+  .map(([k, v]) => `<span class="cost">${icon(k)}${v}</span>`).join('');
+const iconSvg = (type, color) => tokenSvg(type, color);
 
 const ui = {
   s: null, board: null, busy: false, selectedUnit: null, selectedTile: null, reach: null, targets: [], hoverTarget: null,
@@ -63,9 +65,9 @@ function mountGame(s) {
         <div class="res"></div>
         <div class="race" title="First house to ${RENOWN_TO_WIN} renown wins"></div>
         <div class="tools">
-          <button data-act="help" title="How to play (H)">?</button>
+          <button data-act="help" title="How to play (H)">${icon('help')}</button>
           <button data-act="mute" class="mute" title="Sound on/off"></button>
-          <button data-act="menu" title="Menu">☰</button>
+          <button data-act="menu" title="Menu">${icon('menu')}</button>
         </div>
       </header>
       <main class="stage">
@@ -74,21 +76,21 @@ function mountGame(s) {
           <div class="banner"></div>
           <div class="tip"></div>
           <div class="map-tools">
-            <button data-act="danger" class="chip" title="Shade every hex enemies can strike next turn (D)">⚠ Danger zones</button>
+            <button data-act="danger" class="chip" title="Shade every hex enemies can strike next turn (D)">${icon('danger')}<span>Danger zones</span></button>
           </div>
           <div class="board-actions">
-            <button class="undo" data-act="undo" title="Take back your last move (U)">↶ Undo move</button>
+            <button class="undo" data-act="undo" title="Take back your last move (U)">${icon('undo')}<span>Undo move</span></button>
             <button class="next" data-act="next" title="Select next ready unit (N)">Next unit</button>
             <button class="end" data-act="end" title="End turn (E)">End turn</button>
           </div>
         </section>
         <aside class="side">
           <nav class="tabs">
-            <button data-act="tab" data-v="select">Selection</button>
-            <button data-act="tab" data-v="market">Market</button>
-            <button data-act="tab" data-v="research">Research</button>
-            <button data-act="tab" data-v="court">Court</button>
-            <button data-act="tab" data-v="log">Chronicle</button>
+            <button data-act="tab" data-v="select">${icon('castle')}<span>Selection</span></button>
+            <button data-act="tab" data-v="market">${icon('scales')}<span>Market</span></button>
+            <button data-act="tab" data-v="research">${icon('book')}<span>Research</span></button>
+            <button data-act="tab" data-v="court">${icon('crown')}<span>Court</span></button>
+            <button data-act="tab" data-v="log">${icon('scroll')}<span>Chronicle</span></button>
           </nav>
           <div class="pane"></div>
         </aside>
@@ -120,7 +122,8 @@ function render() {
   root.querySelector('.next').disabled = !myTurn() || !ready;
   root.querySelector('.undo').hidden = !(ui.undo && myTurn());
   root.querySelector('[data-act="danger"]').classList.toggle('on', ui.showDanger);
-  root.querySelector('.mute').textContent = isMuted() ? '🔇' : '🔊';
+  const mute = root.querySelector('.mute');
+  if (mute.dataset.m !== String(isMuted())) { mute.dataset.m = String(isMuted()); mute.innerHTML = icon(isMuted() ? 'mute' : 'sound'); }
 }
 
 function renderBar() {
@@ -129,7 +132,7 @@ function renderBar() {
   const inc = income(s, s.playerId);
   const net = inc.grain - inc.upkeep;
   root.querySelector('.turn').innerHTML = `<b>Turn ${s.turn}</b><small>of ${TURN_LIMIT}</small>`;
-  const r = (icon, v, d, title, warn = false) => `<div class="r${warn ? ' warn' : ''}" title="${title}"><span>${icon}</span><b>${v}</b><small class="${d < 0 ? 'neg' : 'pos'}">${d >= 0 ? '+' : ''}${d}</small></div>`;
+  const r = (ic, v, d, title, warn = false) => `<div class="r${warn ? ' warn' : ''}" title="${title}">${icon(ic)}<b>${v}</b><small class="${d < 0 ? 'neg' : 'pos'}">${d >= 0 ? '+' : ''}${d}</small></div>`;
   root.querySelector('.res').innerHTML =
     r('💰', f.gold, inc.gold, 'Gold: recruits, upgrades and buildings') +
     r('🌾', f.grain, net, `Grain: each soldier eats 1 per turn (${inc.grain} grown, ${inc.upkeep} eaten). If it runs out, soldiers starve.`, f.grain + net < 0) +
@@ -138,7 +141,7 @@ function renderBar() {
     loreChip(f, inc.lore);
   root.querySelector('.race').innerHTML = s.factions.map((x) => `
     <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown">
-      <span class="nm">${esc(x.short)}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
+      <span class="nm">${crest(x.key, x.color, 'crest xs')}${esc(x.short)}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
     </div>`).join('');
 }
 
@@ -146,7 +149,7 @@ function loreChip(f, gain) {
   const T = f.research ? TECHS[f.research] : null;
   const idle = !T && Object.keys(TECHS).some((k) => techAvailable(ui.s, ui.s.playerId, k));
   const title = T ? `Researching ${T.name}: ${f.lore}/${T.cost} lore` : idle ? 'Nothing being researched: lore is banked. Click to choose.' : 'Lore';
-  return `<button class="r lore${idle ? ' idle' : ''}" data-act="tab" data-v="research" title="${esc(title)}"><span>📜</span><b>${T ? `${Math.min(f.lore, T.cost)}/${T.cost}` : f.lore}</b><small class="pos">+${gain}</small>${T ? `<i class="lore-bar"><i style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></i></i>` : ''}</button>`;
+  return `<button class="r lore${idle ? ' idle' : ''}" data-act="tab" data-v="research" title="${esc(title)}">${icon('lore')}<b>${T ? `${Math.min(f.lore, T.cost)}/${T.cost}` : f.lore}</b><small class="pos">+${gain}</small>${T ? `<i class="lore-bar"><i style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></i></i>` : ''}</button>`;
 }
 
 // ---------------------------------------------------------------- side panes
@@ -164,7 +167,7 @@ function renderPane() {
 
 function statLine(u) {
   const U = UNITS[u.type];
-  return `<div class="stats"><span title="Attack">⚔ ${baseAtk(ui.s, u.owner, u.type)}</span><span title="Defence">🛡 ${baseDef(ui.s, u.owner, u.type)}</span><span title="Movement">🥾 ${movePoints(ui.s, u)}</span><span title="Range">🎯 ${U.range}</span></div>`;
+  return `<div class="stats"><span title="Attack">${icon('attack')}${baseAtk(ui.s, u.owner, u.type)}</span><span title="Defence">${icon('defence')}${baseDef(ui.s, u.owner, u.type)}</span><span title="Movement">${icon('move')}${movePoints(ui.s, u)}</span><span title="Range">${icon('range')}${U.range}</span></div>`;
 }
 
 function unitCard(u) {
@@ -200,8 +203,8 @@ function cityCard(c) {
   const yields = {};
   for (const t of tiles) { const y = TERRAIN[s.tiles[t].t].yields; yields[y] = (yields[y] ?? 0) + L.tileYield; }
   let out = `<div class="card city-card" style="--c:${owner.color}">
-    <div class="row"><div class="castle">🏰</div><div><b>${esc(c.name)}</b>${c.capital ? ' <span class="tag">Capital</span>' : ''}<div class="muted">${esc(owner.name)} · Level ${c.level}</div></div></div>
-    <div class="yields">💰${L.gold + (c.capital ? 2 : 0)} ${c.capital ? '🌾+2 ' : ''}${Object.entries(yields).map(([k, v]) => `${GOODS[k].icon}${v}`).join(' ')}<span class="muted small">per turn</span></div>`;
+    <div class="row"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite(c, owner.color)}</svg><div><b>${esc(c.name)}</b>${c.capital ? ' <span class="tag">Capital</span>' : ''}<div class="muted">${esc(owner.name)} · Level ${c.level}</div></div></div>
+    <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${c.capital ? `<span>${icon('grain')}+2</span>` : ''}${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="muted small">per turn</span></div>`;
   if (!mine) {
     out += `<p class="muted small">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : 'You are at peace with its owner.'}</p></div>`;
     return out;
@@ -235,7 +238,7 @@ function cityCard(c) {
     const ok = can && left > 0 && !blocked && canAfford(f, cost);
     const U = UNITS[t];
     out += `<button class="rec" data-act="recruit" data-v="${c.id}" data-u="${t}" ${ok ? '' : 'disabled'} title="${esc(U.desc)}">
-      ${iconSvg(t, s.factions[s.playerId].color)}<b>${U.name}</b><small>⚔${baseAtk(s, s.playerId, t)} 🛡${baseDef(s, s.playerId, t)} 🥾${U.move + (t === 'knight' && f.techs.includes('stirrups') ? 1 : 0) + (t === 'cavalry' && f.key === 'ashkar' ? 1 : 0)}${U.range > 1 ? ` 🎯${U.range}` : ''} ❤${U.hp}</small><span>${costHtml(cost)}</span></button>`;
+      ${iconSvg(t, s.factions[s.playerId].color)}<b>${U.name}</b><small>${icon('attack')}${baseAtk(s, s.playerId, t)} ${icon('defence')}${baseDef(s, s.playerId, t)} ${icon('move')}${U.move + (t === 'knight' && f.techs.includes('stirrups') ? 1 : 0) + (t === 'cavalry' && f.key === 'ashkar' ? 1 : 0)}${U.range > 1 ? ` ${icon('range')}${U.range}` : ''} ${icon('hp')}${U.hp}</small><span>${costHtml(cost)}</span></button>`;
   }
   out += '</div></div>';
   return out;
@@ -252,7 +255,7 @@ function goals() {
     ['Recruit a unit (click your town)', t.recruited],
     ['Stand on a shrine ✦ for renown', (f.stats.renown.shrines ?? 0) > 0],
     ['Grow a town or add a building', f.stats.built > 0],
-    ['Pick something to research (📜)', f.research != null || f.techs.length > 0],
+    ['Pick something to research', f.research != null || f.techs.length > 0],
   ];
   if (list.every(([, d]) => d) || s.turn > 15) return '';
   return `<div class="card goals"><b>Early goals</b>${list.map(([txt, d]) => `<div class="goal ${d ? 'done' : ''}"><span>${d ? '✔' : '○'}</span>${txt}</div>`).join('')}</div>`;
@@ -264,7 +267,7 @@ function paneSelect() {
     const f = me();
     const ruler = s.characters[f.rulerId];
     return `<div class="card intro" style="--c:${f.color}">
-      <b>${esc(f.name)}</b><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
+      <div class="row">${crest(f.key, f.color, 'crest md')}<b class="intro-name">${esc(f.name)}</b></div><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
       <p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.</p></div>
       ${goals()}
       <div class="howto-mini">
@@ -281,7 +284,7 @@ function paneSelect() {
   if (c) out += cityCard(c);
   if (!u && !c) {
     const T = TERRAIN[t.t];
-    out += `<div class="card"><b>${T.name}</b><p class="muted small">${T.pass ? `Movement: ${T.move > 1 ? 'ends your move when entered' : 'normal'}. Defence ×${T.def}.` : 'Impassable.'} ${t.city >= 0 ? `Worked by ${esc(s.cities[t.city].name)}: yields ${GOODS[T.yields].icon}.` : ''}</p>
+    out += `<div class="card"><b>${T.name}</b><p class="muted small">${T.pass ? `Movement: ${T.move > 1 ? 'ends your move when entered' : 'normal'}. Defence ×${T.def}.` : 'Impassable.'} ${t.city >= 0 ? `Worked by ${esc(s.cities[t.city].name)}: yields ${icon(T.yields)}.` : ''}</p>
       ${t.shrine ? '<p><span class="gold">✦ Ancient shrine.</span> A unit standing here at the start of your turn earns +1 renown.</p>' : ''}</div>`;
   } else if (t.shrine) out += '<p class="small"><span class="gold">✦</span> Shrine: +1 renown per turn for whoever stands here.</p>';
   return out + goals();
@@ -299,12 +302,12 @@ function paneMarket() {
     const s1 = quote(s, s.playerId, g, 1, 'sell').total;
     const s5 = quote(s, s.playerId, g, 5, 'sell').total;
     return `<div class="good">
-      <div class="row"><b>${G.icon} ${G.name}</b><span>${p.toFixed(1)} ${trend}</span><span class="muted">you have ${f[g]}</span></div>
+      <div class="row"><b>${icon(g)} ${G.name}</b><span>${p.toFixed(1)} ${trend}</span><span class="muted">you have ${f[g]}</span></div>
       <div class="trade">
-        <button data-act="trade" data-g="${g}" data-n="1" data-side="buy" ${can && f.gold >= b1 ? '' : 'disabled'}>Buy 1 <small>−${b1}💰</small></button>
-        <button data-act="trade" data-g="${g}" data-n="5" data-side="buy" ${can && f.gold >= b5 ? '' : 'disabled'}>Buy 5 <small>−${b5}💰</small></button>
-        <button data-act="trade" data-g="${g}" data-n="1" data-side="sell" ${can && f[g] >= 1 ? '' : 'disabled'}>Sell 1 <small>+${s1}💰</small></button>
-        <button data-act="trade" data-g="${g}" data-n="5" data-side="sell" ${can && f[g] >= 5 ? '' : 'disabled'}>Sell 5 <small>+${s5}💰</small></button>
+        <button data-act="trade" data-g="${g}" data-n="1" data-side="buy" ${can && f.gold >= b1 ? '' : 'disabled'}>Buy 1 <small>−${b1}${icon('gold')}</small></button>
+        <button data-act="trade" data-g="${g}" data-n="5" data-side="buy" ${can && f.gold >= b5 ? '' : 'disabled'}>Buy 5 <small>−${b5}${icon('gold')}</small></button>
+        <button data-act="trade" data-g="${g}" data-n="1" data-side="sell" ${can && f[g] >= 1 ? '' : 'disabled'}>Sell 1 <small>+${s1}${icon('gold')}</small></button>
+        <button data-act="trade" data-g="${g}" data-n="5" data-side="sell" ${can && f[g] >= 5 ? '' : 'disabled'}>Sell 5 <small>+${s5}${icon('gold')}</small></button>
       </div></div>`;
   }).join('');
   return `<p class="muted small">One market serves all four houses. Every purchase pushes the price up and every sale pushes it down, for everyone. Prices drift back over time. Buy cheap, sell dear, and starve your rivals of what they need.</p>${rows}`;
@@ -330,14 +333,14 @@ function paneCourt() {
     if (r.war) {
       const { need } = peaceTerms(s, s.playerId, x.id);
       actions = need === Infinity ? '<span class="muted small">They will not talk peace while winning this badly.</span>'
-        : `<button data-act="peace" data-v="${x.id}" data-gold="${need}" ${can && f.gold >= need ? '' : 'disabled'}>Offer peace${need ? ` (+${need}💰 tribute)` : ''}</button>`;
+        : `<button data-act="peace" data-v="${x.id}" data-gold="${need}" ${can && f.gold >= need ? '' : 'disabled'}>Offer peace${need ? ` (+${need}${icon('gold')} tribute)` : ''}</button>`;
     } else if (ui.confirmWar === x.id) {
       actions = `<span class="small">Declare war? Costs 2 renown.</span> <button class="danger" data-act="war" data-v="${x.id}">Declare war</button><button class="ghost" data-act="nowar">Cancel</button>`;
     } else {
       actions = r.truce > s.turn ? `<span class="muted small">Truce until turn ${r.truce}</span>` : `<button class="ghost danger-text" data-act="askwar" data-v="${x.id}" ${can ? '' : 'disabled'}>Declare war…</button>`;
     }
     return `<div class="dip" style="--c:${x.color}">
-      <div class="row"><b>${esc(x.name)}</b><span class="badge ${r.war ? 'war' : 'peace'}">${r.war ? 'At war' : 'Peace'}</span></div>
+      <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badge ${r.war ? 'war' : 'peace'}">${r.war ? 'At war' : 'Peace'}</span></div>
       <div class="muted small">${esc(ruler.name)} (${ruler.traits.map((t) => TRAITS[t].name).join(', ')}) · ${citiesOf(s, x.id).length} towns · ${x.renown} renown</div>
       <div class="power"><span>Army</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
       <div class="acts">${actions}</div>
@@ -360,14 +363,14 @@ function paneResearch() {
   const T = f.research ? TECHS[f.research] : null;
   const turnsLeft = (cost) => (f.lore >= cost ? 'now' : inc.lore > 0 ? `${Math.ceil((cost - f.lore) / inc.lore)} turns` : 'never');
   let out = `<div class="card research-now">
-    <div class="row"><b>📜 Lore ${f.lore}</b><span class="muted small">+${inc.lore} per turn</span></div>
+    <div class="row"><b>${icon('lore')} Lore ${f.lore}</b><span class="muted small">+${inc.lore} per turn</span></div>
     ${T ? `<div class="small">Researching <b>${T.name}</b> · ${Math.min(f.lore, T.cost)}/${T.cost} · done in ${turnsLeft(T.cost)}</div>
       <div class="hpbar lore"><span style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></span></div>`
     : '<div class="small">Nothing being researched. Lore is banked until you choose.</div>'}
     <p class="muted small">Every town makes lore equal to its level, the capital +1, a Library +2. Each branch is a ladder: master one step to unlock the next. You won't have time for everything.</p></div>`;
   out += '<div class="tree">';
   for (const [bk, B] of Object.entries(BRANCHES)) {
-    out += `<div class="branch"><h4>${B.icon} ${B.name}</h4>`;
+    out += `<div class="branch"><h4>${icon({ war: 'attack', econ: 'scales', state: 'crown' }[bk])} ${B.name}</h4>`;
     for (const [k, X] of Object.entries(TECHS).filter(([, x]) => x.branch === bk).sort((a, b) => a[1].tier - b[1].tier)) {
       const done = f.techs.includes(k);
       const avail = techAvailable(s, fid, k);
@@ -376,7 +379,7 @@ function paneResearch() {
       out += `<button class="tech ${done ? 'done' : cur ? 'cur' : avail ? 'avail' : 'locked'}" data-act="research" data-v="${k}" ${can && avail && !cur ? '' : 'disabled'}>
         <b>${done ? '✓ ' : cur ? '▶ ' : ''}${X.name}</b><small>${esc(X.desc)}</small>
         ${unlocks.length ? `<small class="unlock">Unlocks policy: ${unlocks.join(', ')}</small>` : ''}
-        ${done ? '' : `<span class="cost">📜${X.cost}${avail && !cur ? ` · ${turnsLeft(X.cost)}` : ''}</span>`}</button>`;
+        ${done ? '' : `<span class="cost">${icon('lore')}${X.cost}${avail && !cur ? ` · ${turnsLeft(X.cost)}` : ''}</span>`}</button>`;
     }
     out += '</div>';
   }
@@ -389,7 +392,7 @@ function paneResearch() {
     const avail = policyAvailable(s, fid, k);
     const full = f.policies.length >= slots;
     const btn = on ? `<button class="ghost small" data-act="droppol" data-v="${k}" ${can ? '' : 'disabled'}>Drop</button>`
-      : avail ? `<button class="small" data-act="adopt" data-v="${k}" ${can && !full && f.gold >= POLICY_COST ? '' : 'disabled'} title="${full ? 'No free slot: drop a policy first' : ''}">Adopt <small>−${POLICY_COST}💰</small></button>`
+      : avail ? `<button class="small" data-act="adopt" data-v="${k}" ${can && !full && f.gold >= POLICY_COST ? '' : 'disabled'} title="${full ? 'No free slot: drop a policy first' : ''}">Adopt <small>−${POLICY_COST}${icon('gold')}</small></button>`
         : `<span class="muted small">Needs ${TECHS[P.req].name}</span>`;
     out += `<div class="policy ${on ? 'on' : avail ? '' : 'locked'}"><div><b>${on ? '✓ ' : ''}${P.name}</b><small>${esc(P.desc)}</small></div>${btn}</div>`;
   }
@@ -397,7 +400,7 @@ function paneResearch() {
 }
 
 function paneLog() {
-  return `<div class="log">${[...ui.s.log].reverse().slice(0, 80).map((l) => `<div class="entry ${l.kind}"><time>T${l.turn}</time>${esc(l.text)}</div>`).join('')}</div>`;
+  return `<div class="log">${[...ui.s.log].reverse().slice(0, 80).map((l) => `<div class="entry ${l.kind}"><time>T${l.turn}</time><span>${iconize(esc(l.text))}</span></div>`).join('')}</div>`;
 }
 
 // ---------------------------------------------------------------- input
@@ -493,7 +496,7 @@ function hideTip() { root.querySelector('.tip')?.classList.remove('on'); }
 function showPreview(att, def, e) {
   const p = combatPreview(ui.s, att, def);
   const owner = def.owner < 0 ? 'Rebel' : ui.s.factions[def.owner].short;
-  tipAt(`<div class="pv"><div class="pv-h">${UNITS[att.type].name} ⚔ ${owner} ${UNITS[def.type].name}</div>
+  tipAt(`<div class="pv"><div class="pv-h">${UNITS[att.type].name} <span class="muted">vs</span> ${owner} ${UNITS[def.type].name}</div>
     <div class="pv-row"><span>You deal</span><b class="${p.kill ? 'pos' : ''}">${p.dmg}${p.kill ? ' · KILL' : ` (${def.hp - p.dmg} left)`}</b></div>
     <div class="pv-row"><span>You take</span><b class="${p.dies ? 'neg' : p.ret ? 'warn' : 'pos'}">${p.ret}${p.dies ? ' · YOU DIE' : p.ret === 0 ? (p.kill ? '' : ' (out of reach)') : ` (${att.hp - p.ret} left)`}</b></div>
     ${p.kill && UNITS[att.type].range === 1 ? '<div class="muted small">Your unit will advance into the hex.</div>' : ''}
@@ -503,7 +506,7 @@ function showPreview(att, def, e) {
 function showUnitTip(u, e) {
   const owner = u.owner < 0 ? 'Rebels' : ui.s.factions[u.owner].name;
   const U = UNITS[u.type];
-  tipAt(`<div class="pv"><div class="pv-h">${esc(owner)}: ${U.name}</div><div class="small">❤ ${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} · ⚔${U.atk} 🛡${U.def} 🥾${U.move} 🎯${U.range}</div></div>`, e);
+  tipAt(`<div class="pv"><div class="pv-h">${esc(owner)}: ${U.name}</div><div class="small stats">${icon('hp')}${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} ${icon('attack')}${baseAtk(ui.s, u.owner, u.type)} ${icon('defence')}${baseDef(ui.s, u.owner, u.type)} ${icon('move')}${movePoints(ui.s, u)} ${icon('range')}${U.range}</div></div>`, e);
 }
 
 async function doMove(u, tile) {
@@ -758,15 +761,15 @@ function showEvent() {
 function showHelp(first) {
   openModal(`<h2>How to play Hexmarch</h2>
     <div class="help">
-      <div><b>🎯 Goal</b><p>Be the first house to reach <b>${RENOWN_TO_WIN} renown</b>, or the last one standing. If nobody gets there by turn ${TURN_LIMIT}, the most renowned house wins.</p></div>
-      <div><b>★ Renown</b><p>Claim free towns (+2), seize rival towns (+4, capitals +8), stand on a shrine <span class="gold">✦</span> (+1 each turn), win battles (+1, a ruler +4), grow towns to level 3 (+2), raise a cathedral (+4 and +1 each turn).</p></div>
-      <div><b>⚔ Units</b><p>Click a unit: blue hexes are where it can go, red rings are enemies it can hit. <b>Hover an enemy for the exact outcome</b>: every fight is predictable. Forests and hills end your move but defend well. Moving next to an enemy stops you (zone of control).</p></div>
-      <div><b>🏰 Towns</b><p>Click your town to recruit (one unit per turn, two with Barracks), grow it, and add buildings. Each soldier eats 1 grain per turn. Run out and your army starves.</p></div>
-      <div><b>📜 Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
-      <div><b>⚖ Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
-      <div><b>⭐ Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
-      <div><b>⚠ Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
-      <div><b>👑 Your ruler</b><p>Your ruler fights on the map and inspires adjacent troops (+25% attack). If they fall, your heir inherits, and some of your towns may revolt.</p></div>
+      <div><b>${icon('range')}Goal</b><p>Be the first house to reach <b>${RENOWN_TO_WIN} renown</b>, or the last one standing. If nobody gets there by turn ${TURN_LIMIT}, the most renowned house wins.</p></div>
+      <div><b>${icon('renown')}Renown</b><p>Claim free towns (+2), seize rival towns (+4, capitals +8), stand on a shrine <span class="gold">✦</span> (+1 each turn), win battles (+1, a ruler +4), grow towns to level 3 (+2), raise a cathedral (+4 and +1 each turn).</p></div>
+      <div><b>${icon('attack')}Units</b><p>Click a unit: lit hexes are where it can go, red rings are enemies it can hit. <b>Hover an enemy for the exact outcome</b>: every fight is predictable. Forests and hills end your move but defend well. Moving next to an enemy stops you (zone of control).</p></div>
+      <div><b>${icon('castle')}Towns</b><p>Click your town to recruit (one unit per turn, two with Barracks), grow it, and add buildings. Each soldier eats 1 grain per turn. Run out and your army starves.</p></div>
+      <div><b>${icon('lore')}Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
+      <div><b>${icon('scales')}Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
+      <div><b>${icon('renown')}Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
+      <div><b>${icon('danger')}Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
+      <div><b>${icon('crown')}Your ruler</b><p>Your ruler fights on the map and inspires adjacent troops (+25% attack). If they fall, your heir inherits, and some of your towns may revolt.</p></div>
     </div>
     <p class="muted small">Keys: <kbd>N</kbd> next unit · <kbd>F</kbd> hold · <kbd>U</kbd> undo move · <kbd>D</kbd> danger zones · <kbd>E</kbd> end turn · <kbd>Esc</kbd> deselect</p>
     <div class="actions"><button class="primary" data-close>${first ? 'To war!' : 'Got it'}</button></div>`);
@@ -809,10 +812,10 @@ function showEnd() {
     <div class="eyebrow">Turn ${s.turn}</div>
     <h2>${won ? 'Victory!' : 'Defeat'}</h2>
     <p>${won ? `${esc(f.name)} ${why}. The Marches are yours.` : `${esc(w.name)} ${why}.`}</p>
-    <div class="ranking">${ranking.map((x, i) => `<div class="row ${x.id === s.playerId ? 'me' : ''}"><span>#${i + 1} <span class="dot" style="background:${x.color}"></span>${esc(x.name)}${x.alive ? '' : ' †'}</span><b>${x.renown}</b></div>`).join('')}</div>
+    <div class="ranking">${ranking.map((x, i) => `<div class="row ${x.id === s.playerId ? 'me' : ''}"><span>#${i + 1} ${crest(x.key, x.color, 'crest xs')}${esc(x.name)}${x.alive ? '' : ' †'}</span><b>${x.renown}</b></div>`).join('')}</div>
     <h4>Where your renown came from</h4>
     <div class="srcs">${src.map(([k, v]) => `<div class="row"><span>${k}</span><span class="pbar"><span style="width:${(v / maxSrc) * 100}%"></span></span><b>${v}</b></div>`).join('') || '<p class="muted">None, alas.</p>'}</div>
-    <div class="statsline">⚔ ${f.stats.kills} enemies slain · 🏰 ${f.stats.captures} towns taken · ☠ ${f.stats.lost} units lost · 🔨 ${f.stats.built} works built</div>
+    <div class="statsline"><span>${icon('attack')}${f.stats.kills} enemies slain</span><span>${icon('castle')}${f.stats.captures} towns taken</span><span>${icon('skull')}${f.stats.lost} units lost</span><span>${icon('hammer')}${f.stats.built} works built</span></div>
     <div class="actions"><button class="primary" data-again>Play again</button><button class="ghost" data-close>Look at the map</button></div></div>`);
   root.querySelector('[data-again]').addEventListener('click', () => showStart());
 }
@@ -828,7 +831,7 @@ function report(entries) {
   if (items.some((l) => l.kind === 'bad')) sfx.bad();
   const box = root.querySelector('.report') ?? Object.assign(document.createElement('div'), { className: 'report' });
   root.querySelector('.board-wrap').appendChild(box);
-  box.innerHTML = `<div class="report-h">While you waited <button class="x" data-dismiss>✕</button></div>${items.map((l) => `<div class="entry ${l.kind}">${esc(l.text)}</div>`).join('')}`;
+  box.innerHTML = `<div class="report-h">While you waited <button class="x" data-dismiss>✕</button></div>${items.map((l) => `<div class="entry ${l.kind}">${iconize(esc(l.text))}</div>`).join('')}`;
   box.classList.add('on');
   box.querySelector('[data-dismiss]').onclick = () => box.classList.remove('on');
   clearTimeout(box._t);
@@ -867,17 +870,18 @@ function showStart() {
   let choice = { faction: 0, difficulty: 'normal', seed: Math.random().toString(36).slice(2, 8) };
   root.innerHTML = `<div class="start">
     <div class="hero">
+      <div class="hero-crests">${FACTIONS.map((F) => crest(F.key, F.color, 'crest md')).join('')}</div>
       <h1>Hex<span>march</span></h1>
       <p class="tag">Four houses. One contested borderland. Thirty-odd turns of steel, silver and succession.</p>
     </div>
     <div class="start-grid">
       <div class="preview"><svg class="board" role="img" aria-label="Map preview"></svg>
-        <div class="seed-row"><label>Map <input class="seed" maxlength="16"></label><button class="ghost" data-s="reroll">🎲 New map</button></div>
+        <div class="seed-row"><label>Map <input class="seed" maxlength="16"></label><button class="ghost" data-s="reroll">${icon('dice')}<span>New map</span></button></div>
       </div>
       <div class="pick">
         <h3>Choose your house</h3>
         <div class="houses">${FACTIONS.map((F, i) => `<button class="house" data-house="${i}" style="--c:${F.color}">
-          <span class="crest"></span><b>${F.name}</b><i>“${F.motto}”</i><small><b>${F.bonus}:</b> ${F.bonusDesc}</small></button>`).join('')}</div>
+          ${crest(F.key, F.color, 'crest lg')}<span class="house-txt"><b>${F.name}</b><i>“${F.motto}”</i><small><b>${F.bonus}:</b> ${F.bonusDesc}</small></span></button>`).join('')}</div>
         <h3>Difficulty</h3>
         <div class="seg diff">${Object.entries(DIFFICULTY).map(([k, D]) => `<button data-diff="${k}">${D.name}</button>`).join('')}</div>
         <button class="primary big" data-s="go">Ride out</button>
