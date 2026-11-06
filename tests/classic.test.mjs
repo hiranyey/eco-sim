@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newGame, setPlayer } from '../src/world.js';
-import { tick, rankings } from '../src/sim.js';
-import { resolveEvent } from '../src/events.js';
-import { GOOD_KEYS, provincesOf } from '../src/core.js';
-import * as act from '../src/actions.js';
+import { newGame, setPlayer } from '../classic/src/world.js';
+import { tick, rankings } from '../classic/src/sim.js';
+import { resolveEvent } from '../classic/src/events.js';
+import { GOOD_KEYS, provincesOf } from '../classic/src/core.js';
+import * as act from '../classic/src/actions.js';
 
 function finite(s) {
   for (const r of s.realms) {
