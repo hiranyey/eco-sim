@@ -1,7 +1,7 @@
 // Procedural map and initial game state.
 import { rand, randInt, pick, shuffle, hashSeed } from './rng.js';
 import { neighbors, distance, within } from './hex.js';
-import { W, H, TERRAIN, FACTIONS, UNITS, GOODS, DIFFICULTY, GIVEN, PLACE_A, PLACE_B, TRAITS } from './data.js';
+import { W, H, TERRAIN, FACTIONS, UNITS, GOODS, DIFFICULTY, NAMES, TITLES, PRONOUNS, PLACE_A, PLACE_B, TRAITS } from './data.js';
 
 function noiseField(s, cell) {
   const gw = Math.ceil(W / cell) + 2;
@@ -93,9 +93,33 @@ export function newCharacter(s, age) {
     if ((t === 'robust' && traits.includes('frail')) || (t === 'frail' && traits.includes('robust'))) continue;
     traits.push(t);
   }
+  const sex = rand(s) < 0.5 ? 'f' : 'm';
+  // Avoid two living characters sharing a name.
+  const taken = new Set(Object.values(s.characters).filter((c) => c.alive).map((c) => c.name));
+  let name = pick(s, NAMES[sex]);
+  for (let k = 0; k < 6 && taken.has(name); k++) name = pick(s, NAMES[sex]);
   const id = s.nextId++;
-  s.characters[id] = { id, name: pick(s, GIVEN), age, traits, alive: true };
+  s.characters[id] = { id, name, sex, age, traits, alive: true };
   return id;
+}
+
+// Older saves have no gender on characters: recover it from the name.
+export function sexOf(c) {
+  if (c.sex) return c.sex;
+  if (NAMES.f.includes(c.name)) return 'f';
+  if (NAMES.m.includes(c.name)) return 'm';
+  return c.id % 2 ? 'f' : 'm';
+}
+
+// "Queen Brenna", "Prince Aldric". role: 'ruler' | 'heir' | null (name only).
+export function titled(c, role) {
+  if (!c) return '';
+  const t = role ? TITLES[role]?.[sexOf(c)] : null;
+  return t ? `${t} ${c.name}` : c.name;
+}
+
+export function pronoun(c, kind = 'sub') {
+  return PRONOUNS[sexOf(c)][kind];
 }
 
 export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'normal' } = {}) {
@@ -140,7 +164,7 @@ export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'no
     const heir = rand(s) < 0.75 ? newCharacter(s, randInt(s, 2, 14)) : null;
     s.factions.push({
       id: i, key: F.key, name: F.name, short: F.short, color: F.color, alive: true, ai: i !== playerFaction,
-      gold: 10, grain: 10, timber: 4, iron: 2, renown: 0, rulerId: ruler, heirId: heir,
+      gold: 10, grain: 10, timber: 4, iron: 2, lore: 0, techs: [], research: null, policies: [], renown: 0, rulerId: ruler, heirId: heir,
       stats: { kills: 0, captures: 0, lost: 0, built: 0, renown: {} }, eliminatedTurn: null,
     });
     s.cities.push({ id: i, name: placeName(s, usedNames), tile: capitals[i], owner: i, level: 1, buildings: [], capital: true, recruits: 0 });
