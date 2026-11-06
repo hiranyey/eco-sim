@@ -180,3 +180,23 @@ test('policies use slots and cost gold', () => {
   dropPolicy(s, 0, 'conscription');
   assert.deepEqual(f.policies, ['tithes']);
 });
+
+test('characters have a gender, a matching name, titles and pronouns', async () => {
+  const { NAMES } = await import('../js/data.js');
+  const { titled, pronoun, sexOf } = await import('../js/world.js');
+  const s = newGame({ seed: 'names', playerFaction: 0 });
+  const chars = Object.values(s.characters);
+  assert.ok(chars.length >= 4);
+  for (const c of chars) {
+    assert.ok(c.sex === 'm' || c.sex === 'f');
+    assert.ok(NAMES[c.sex].includes(c.name), `${c.name} matches ${c.sex}`);
+    assert.equal(titled(c, 'ruler'), `${c.sex === 'f' ? 'Queen' : 'King'} ${c.name}`);
+    assert.equal(titled(c, 'heir'), `${c.sex === 'f' ? 'Princess' : 'Prince'} ${c.name}`);
+    assert.equal(pronoun(c), c.sex === 'f' ? 'she' : 'he');
+  }
+  const living = chars.filter((c) => c.alive).map((c) => c.name);
+  assert.equal(new Set(living).size, living.length, 'no two living characters share a name');
+  // Saves from before genders existed: recovered from the name.
+  assert.equal(sexOf({ id: 3, name: 'Brenna' }), 'f');
+  assert.equal(sexOf({ id: 4, name: 'Aldric' }), 'm');
+});

@@ -1,7 +1,9 @@
 // Procedural ruler portraits. Every character gets a stable face from their id: skin, hair,
-// eyes, brows, beard and build vary; age greys the hair and lines the face; some traits show
+// eyes, brows and build vary; gender shapes the hairstyle, jaw, brows, lashes, lips and beard;
+// age greys the hair and lines the face; some traits show
 // (scars, a pendant, a gold chain, a pallid look). Rulers wear a crown, heirs a circlet.
 import { useDef, shade } from './sprites.js';
+import { sexOf } from '../world.js';
 
 const INK = '#2a1d10';
 const SKIN = ['#f3d6ba', '#ebc39f', '#dcaa83', '#c48f66', '#a06e4a', '#7a4f33', '#5e3b26'];
@@ -46,13 +48,16 @@ export function portrait(c, color, { role = 'ruler', cls = 'portrait' } = {}) {
   const hair = mixHex(baseHair, '#d8d4cc', grey);
   const hairDark = shade(hair, -0.3);
   const eye = pickR(r, EYES);
-  const hairStyle = child ? pickR(r, ['short', 'long', 'curly']) : age > 50 && r() < 0.35 ? 'bald' : pickR(r, ['short', 'long', 'curly', 'braid', 'swept']);
-  const beard = !child && age >= 18 && r() < 0.45 ? pickR(r, ['full', 'goatee', 'moustache', 'full']) : null;
-  const wide = (has('robust') ? 3 : 0) - (has('frail') ? 2 : 0) + (r() - 0.5) * 3;
+  const female = sexOf(c) === 'f';
+  const hairStyle = female
+    ? pickR(r, child ? ['long', 'braid', 'bun', 'curly'] : ['long', 'braid', 'bun', 'swept', 'curly', 'long', 'bun'])
+    : child ? pickR(r, ['short', 'curly', 'swept']) : age > 50 && r() < 0.35 ? 'bald' : pickR(r, ['short', 'swept', 'curly', 'short', 'long']);
+  const beard = !female && !child && age >= 18 && r() < 0.6 ? pickR(r, ['full', 'goatee', 'moustache', 'full']) : null;
+  const wide = (has('robust') ? 3 : 0) - (has('frail') ? 2 : 0) + (r() - 0.5) * 3 - (female ? 1.8 : 0);
   const w = (child ? 21 : 24) + wide;
   const cx = 50;
   const top = child ? 36 : 30;
-  const chin = child ? 80 : 84;
+  const chin = child ? 80 : 84 - (sexOf(c) === 'f' ? 1.5 : 0);
   const eyeY = child ? 62 : 58;
   const eyeDx = child ? 9 : 10;
   const stern = has('conqueror') || has('brave');
@@ -82,6 +87,9 @@ export function portrait(c, color, { role = 'ruler', cls = 'portrait' } = {}) {
   if (has('greedy')) out += `<path d="M${cx - 14},94 Q${cx},108 ${cx + 14},94" fill="none" stroke="#f0c850" stroke-width="2.2" stroke-dasharray="2.2 1.2"/><circle cx="${cx}" cy="102.5" r="3" fill="url(#pgold)" stroke="${INK}" stroke-width="0.6"/>`;
 
   // ---- hair behind the head
+  if (hairStyle === 'bun') {
+    out += `<circle cx="${cx}" cy="${top - 4}" r="9" fill="${hair}" stroke="${INK}" stroke-width="0.9"/><path d="M${cx - 5},${top - 7} q5,-4 10,0" fill="none" stroke="${hairDark}" stroke-width="0.9"/>`;
+  }
   if (hairStyle === 'long' || hairStyle === 'braid') {
     out += `<path d="M${cx - w - 3},${eyeY - 8} C${cx - w - 6},${eyeY + 20} ${cx - w - 2},${chin + 8} ${cx - w + 6},${chin + 12} L${cx + w - 6},${chin + 12} C${cx + w + 2},${chin + 8} ${cx + w + 6},${eyeY + 20} ${cx + w + 3},${eyeY - 8}Z" fill="${hairDark}" stroke="${INK}" stroke-width="0.8"/>`;
   }
@@ -99,10 +107,11 @@ export function portrait(c, color, { role = 'ruler', cls = 'portrait' } = {}) {
     const ex = cx + sx * eyeDx;
     out += `<path d="M${ex - 5},${eyeY} Q${ex},${eyeY - 4.2 * squint} ${ex + 5},${eyeY} Q${ex},${eyeY + 3 * squint} ${ex - 5},${eyeY}Z" fill="#f8f4ea" stroke="${INK}" stroke-width="0.7"/>`;
     out += `<circle cx="${ex + 0.3}" cy="${eyeY - 0.2}" r="${(er * Math.min(1, squint + 0.2)).toFixed(2)}" fill="${eye}"/><circle cx="${ex + 0.3}" cy="${eyeY - 0.2}" r="1.3" fill="#111"/><circle cx="${ex - 0.8}" cy="${eyeY - 1.2}" r="0.7" fill="#fff"/>`;
-    out += `<path d="M${ex - 5.4},${eyeY - 0.4} Q${ex},${eyeY - 4.8 * squint} ${ex + 5.4},${eyeY - 0.4}" fill="none" stroke="${INK}" stroke-width="1.3" stroke-linecap="round"/>`;
+    out += `<path d="M${ex - 5.4},${eyeY - 0.4} Q${ex},${eyeY - 4.8 * squint} ${ex + 5.4},${eyeY - 0.4}" fill="none" stroke="${INK}" stroke-width="${female ? 1.7 : 1.3}" stroke-linecap="round"/>`;
+    if (female && !child) out += `<path d="M${ex + sx * 5},${eyeY - 0.8}l${sx * 2.2},-1.6M${ex + sx * 3.4},${eyeY - 2.2}l${sx * 1.6},-2" stroke="${INK}" stroke-width="0.9" stroke-linecap="round"/>`;
     if (has('frail') || age >= 60) out += `<path d="M${ex - 4},${eyeY + 3.2} Q${ex},${eyeY + 5.4} ${ex + 4},${eyeY + 3.2}" fill="none" stroke="${skinShade}" stroke-width="1.1"/>`;
     const tilt = stern ? 2.4 : smile ? -0.8 : (r() - 0.5) * 1.6;
-    const thick = has('robust') || stern ? 2.6 : 1.8;
+    const thick = female ? (stern ? 1.9 : 1.4) : has('robust') || stern ? 2.6 : 1.8;
     const by = eyeY - 7.5;
     const inner = ex - sx * 5.5;
     const outer = ex + sx * 6;
@@ -115,7 +124,12 @@ export function portrait(c, color, { role = 'ruler', cls = 'portrait' } = {}) {
   // mouth
   const my = eyeY + nl + 7;
   const mc = smile ? 2.6 : stern ? -1.4 : 0.6;
-  out += `<path d="M${cx - 6},${my} Q${cx},${my + mc} ${cx + 6},${my}" fill="none" stroke="#7a3328" stroke-width="1.6" stroke-linecap="round"/>`;
+  if (female && !child) {
+    out += `<path d="M${cx - 6},${my} Q${cx - 3},${my - 2.4} ${cx},${my - 1.2} Q${cx + 3},${my - 2.4} ${cx + 6},${my} Q${cx},${my + 3.4 + Math.max(0, mc)} ${cx - 6},${my}Z" fill="#b5534a" stroke="#7a3328" stroke-width="0.8" stroke-linejoin="round"/>`;
+    out += `<path d="M${cx - 5.5},${my} Q${cx},${my + mc * 0.6} ${cx + 5.5},${my}" fill="none" stroke="#6a2a22" stroke-width="0.9"/>`;
+  } else {
+    out += `<path d="M${cx - 6},${my} Q${cx},${my + mc} ${cx + 6},${my}" fill="none" stroke="#7a3328" stroke-width="1.6" stroke-linecap="round"/>`;
+  }
   if (smile) out += `<path d="M${cx - 4},${my + 0.6} Q${cx},${my + mc + 1.6} ${cx + 4},${my + 0.6}" fill="#a8483c" opacity="0.5"/>`;
   // age lines
   if (age >= 45) {
@@ -161,11 +175,15 @@ export function portrait(c, color, { role = 'ruler', cls = 'portrait' } = {}) {
     out += `<path d="${d}" fill="${hair}" stroke="${INK}" stroke-width="0.9" stroke-linejoin="round"/>`;
   } else {
     const part = hairStyle === 'swept' ? 8 : r() < 0.5 ? -4 : 4;
-    out += `<path d="M${cx - w - 2},${eyeY + (hairStyle === 'short' ? -3 : 8)} C${cx - w - 4},${crown - 4} ${cx - 8},${crown - 8} ${cx + 2},${crown - 7} C${cx + w + 2},${crown - 6} ${cx + w + 5},${eyeY - 12} ${cx + w + 2},${eyeY + (hairStyle === 'short' ? -3 : 8)} C${cx + w - 1},${eyeY - 9} ${cx + w - 4},${top + 12} ${cx + part},${top + 9} C${cx - 6},${top + 14} ${cx - w + 2},${top + 14} ${cx - w + 1},${eyeY - 4}Z" fill="${hair}" stroke="${INK}" stroke-width="0.9" stroke-linejoin="round"/>`;
+    out += `<path d="M${cx - w - 2},${eyeY + (hairStyle === 'short' || hairStyle === 'bun' ? -3 : 8)} C${cx - w - 4},${crown - 4} ${cx - 8},${crown - 8} ${cx + 2},${crown - 7} C${cx + w + 2},${crown - 6} ${cx + w + 5},${eyeY - 12} ${cx + w + 2},${eyeY + (hairStyle === 'short' || hairStyle === 'bun' ? -3 : 8)} C${cx + w - 1},${eyeY - 9} ${cx + w - 4},${top + 12} ${cx + part},${top + 9} C${cx - 6},${top + 14} ${cx - w + 2},${top + 14} ${cx - w + 1},${eyeY - 4}Z" fill="${hair}" stroke="${INK}" stroke-width="0.9" stroke-linejoin="round"/>`;
     out += `<path d="M${cx - w + 4},${top + 6} C${cx - 8},${crown - 3} ${cx + 6},${crown - 3} ${cx + w - 6},${top + 4}" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="2.2" stroke-linecap="round"/>`;
     if (hairStyle === 'braid') {
       for (let k = 0; k < 4; k++) out += `<ellipse cx="${cx + w + 3}" cy="${eyeY + 10 + k * 7}" rx="3.6" ry="4.2" fill="${hair}" stroke="${INK}" stroke-width="0.7"/>`;
     }
+  }
+
+  if (female && !child && (hairStyle === 'bun' || hairStyle === 'swept')) {
+    out += `<circle cx="${cx - w + 1}" cy="${eyeY + 10}" r="1.7" fill="url(#pgold)" stroke="${INK}" stroke-width="0.5"/><circle cx="${cx + w - 1}" cy="${eyeY + 10}" r="1.7" fill="url(#pgold)" stroke="${INK}" stroke-width="0.5"/>`;
   }
 
   // ---- headwear

@@ -75,9 +75,22 @@ export const DIFFICULTY = {
   hard: { name: 'Warlord', aiGold: 1.35, aiStart: 1 },
 };
 
-export const GIVEN = ['Aldric', 'Brenna', 'Cassian', 'Dorin', 'Elsa', 'Fenwick', 'Gisela', 'Halvard', 'Ilse', 'Joren', 'Katrin', 'Leof',
-  'Maren', 'Niall', 'Odile', 'Piers', 'Quilla', 'Roderic', 'Sabine', 'Tamsin', 'Ulric', 'Vera', 'Wystan', 'Yara', 'Edda', 'Corwin',
-  'Liesel', 'Matthias', 'Rowena', 'Sigrun', 'Anselm', 'Beatrix', 'Conrad', 'Dagny', 'Emeric', 'Freya', 'Gideon', 'Ivo', 'Magnus', 'Petra'];
+// Given names by gender. Every character has an explicit gender; names are drawn to match.
+export const NAMES = {
+  m: ['Aldric', 'Cassian', 'Dorin', 'Fenwick', 'Halvard', 'Joren', 'Leof', 'Niall', 'Piers', 'Roderic', 'Ulric', 'Wystan', 'Corwin',
+    'Matthias', 'Anselm', 'Conrad', 'Emeric', 'Gideon', 'Ivo', 'Magnus', 'Osric', 'Bertram', 'Tobias', 'Edmund', 'Lothar', 'Rainer'],
+  f: ['Brenna', 'Elsa', 'Gisela', 'Ilse', 'Katrin', 'Maren', 'Odile', 'Quilla', 'Sabine', 'Tamsin', 'Vera', 'Yara', 'Edda', 'Liesel',
+    'Rowena', 'Sigrun', 'Beatrix', 'Dagny', 'Freya', 'Petra', 'Adela', 'Hilde', 'Matilda', 'Ottilie', 'Helena', 'Ingrid'],
+};
+export const GIVEN = [...NAMES.m, ...NAMES.f];
+export const TITLES = {
+  ruler: { m: 'King', f: 'Queen' },
+  heir: { m: 'Prince', f: 'Princess' },
+};
+export const PRONOUNS = {
+  m: { sub: 'he', obj: 'him', pos: 'his' },
+  f: { sub: 'she', obj: 'her', pos: 'her' },
+};
 export const PLACE_A = ['Ash', 'Bel', 'Cor', 'Dun', 'El', 'Fen', 'Gal', 'Har', 'Kel', 'Lun', 'Mor', 'Nor', 'Ost', 'Pel', 'Rav', 'Sel',
   'Tor', 'Ul', 'Val', 'Wen', 'Bry', 'Cael', 'Eir', 'Gwyn', 'Thal', 'Brin', 'Stone', 'Oak', 'Mill', 'Crow'];
 export const PLACE_B = ['ford', 'mere', 'vale', 'holm', 'stead', 'wick', 'by', 'ton', 'burg', 'moor', 'fell', 'brook', 'crest', 'haven', 'gate', 'reach'];

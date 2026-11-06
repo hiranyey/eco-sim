@@ -1,5 +1,5 @@
 // Hexmarch UI controller: start screen, input, panels, turn flow and animation.
-import { newGame } from './world.js';
+import { newGame, titled } from './world.js';
 import {
   UNITS, RECRUITABLE, BUILDINGS, GOODS, TERRAIN, TRAITS, FACTIONS, DIFFICULTY, RENOWN_TO_WIN, TURN_LIMIT, CITY_LEVELS,
   TECHS, BRANCHES, POLICIES, POLICY_COST,
@@ -194,7 +194,7 @@ function unitCard(u) {
   }
   const ruler = u.type === 'ruler' && u.owner >= 0 ? s.characters[s.factions[u.owner].rulerId] : null;
   return `<div class="card unit-card" style="--c:${owner.color}">
-    <div class="row">${ruler ? portrait(ruler, owner.color, { cls: 'portrait sm' }) : iconSvg(u.type, owner.color)}<div><b>${ruler ? `${esc(ruler.name)}, ` : ''}${U.name}</b><div class="muted">${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` (×${defenseBonus(s, u)} defence)` : ''}</div></div></div>
+    <div class="row">${ruler ? portrait(ruler, owner.color, { cls: 'portrait sm' }) : iconSvg(u.type, owner.color)}<div><b>${ruler ? `${esc(titled(ruler, 'ruler'))}` : U.name}</b><div class="muted">${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` (×${defenseBonus(s, u)} defence)` : ''}</div></div></div>
     <div class="hpbar"><span style="width:${(u.hp / max) * 100}%"></span><em>${u.hp} / ${max} HP</em></div>
     ${statLine(u)}
     <p class="muted small">${U.desc}</p>
@@ -284,7 +284,7 @@ function paneSelect() {
         ['gold', `+${income(s, s.playerId).gold}`, 'Gold / turn'],
         ['renown', `+${renownIncome(s, s.playerId)}`, 'Renown / turn'],
       ].map(([ic, v, l]) => `<div>${icon(ic)}<b>${v}</b><small>${l}</small></div>`).join('')}</div>
-      <div class="row ruled">${portrait(ruler, f.color, { cls: 'portrait sm' })}<p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.<br><span class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</span></p></div></div>
+      <div class="row ruled">${portrait(ruler, f.color, { cls: 'portrait sm' })}<p>Ruled by <b>${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age}.<br><span class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</span></p></div></div>
       ${goals()}
       <div class="howto-mini">
         <p><b>Click a unit</b> to see where it can go. <b>Red rings</b> are enemies in range: hover one to preview the fight.</p>
@@ -348,7 +348,7 @@ function paneMarket() {
 
 function charCard(c, label, role = 'ruler') {
   if (!c) return `<div class="card char empty"><div class="portrait-empty">?</div><div><div class="muted small">${label}</div><p class="muted">None yet. An heir may still be born.</p></div></div>`;
-  return `<div class="card char">${portrait(c, me().color, { role, cls: 'portrait lg' })}<div><div class="eyebrow-l">${label}</div><b>${esc(c.name)}</b> <span class="muted">age ${c.age}</span>
+  return `<div class="card char">${portrait(c, me().color, { role, cls: 'portrait lg' })}<div><div class="eyebrow-l">${label}</div><b>${esc(titled(c, role))}</b> <span class="muted">age ${c.age}</span>
     <div class="traits">${c.traits.map((t) => `<span class="trait" title="${esc(TRAITS[t].desc)}">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div></div>`;
 }
 
@@ -374,7 +374,7 @@ function paneCourt() {
     }
     return `<div class="dip" style="--c:${x.color}">
       <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badge ${r.war ? 'war' : 'peace'}">${r.war ? 'At war' : 'Peace'}</span></div>
-      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(ruler.name)}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown</div></div>
+      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown</div></div>
       <div class="power"><span>Army</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
       <div class="acts">${actions}</div>
     </div>`;
@@ -593,7 +593,7 @@ function showUnitTip(u, e) {
   const U = UNITS[u.type];
   const ruler = u.type === 'ruler' && u.owner >= 0 ? ui.s.characters[ui.s.factions[u.owner].rulerId] : null;
   const town = cityAt(ui.s, u.tile);
-  tipAt(`<div class="pv">${ruler ? `<div class="tip-ruler">${portrait(ruler, ui.s.factions[u.owner].color, { cls: 'portrait xs' })}<div><b>${esc(ruler.name)}</b>, age ${ruler.age}<div class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</div></div></div>` : ''}<div class="pv-h">${esc(owner)}: ${U.name}${u.vet ? ' ★' : ''}</div>${town ? `<div class="small muted">Holding ${esc(town.name)}</div>` : ''}<div class="small stats">${icon('hp')}${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} ${icon('attack')}${baseAtk(ui.s, u.owner, u.type)} ${icon('defence')}${baseDef(ui.s, u.owner, u.type)} ${icon('move')}${movePoints(ui.s, u)} ${icon('range')}${U.range}</div></div>`, e);
+  tipAt(`<div class="pv">${ruler ? `<div class="tip-ruler">${portrait(ruler, ui.s.factions[u.owner].color, { cls: 'portrait xs' })}<div><b>${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age}<div class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</div></div></div>` : ''}<div class="pv-h">${esc(owner)}: ${U.name}${u.vet ? ' ★' : ''}</div>${town ? `<div class="small muted">Holding ${esc(town.name)}</div>` : ''}<div class="small stats">${icon('hp')}${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} ${icon('attack')}${baseAtk(ui.s, u.owner, u.type)} ${icon('defence')}${baseDef(ui.s, u.owner, u.type)} ${icon('move')}${movePoints(ui.s, u)} ${icon('range')}${U.range}</div></div>`, e);
 }
 
 async function doMove(u, tile) {

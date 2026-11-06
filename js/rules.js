@@ -5,7 +5,7 @@ import {
   W, H, TERRAIN, UNITS, CITY_LEVELS, UPGRADE_COST, BUILDINGS, GOODS, RENOWN_TO_WIN, TURN_LIMIT, DIFFICULTY,
   TECHS, POLICIES, POLICY_COST,
 } from './data.js';
-import { addUnit, maxHp, newCharacter } from './world.js';
+import { addUnit, maxHp, newCharacter, titled, sexOf } from './world.js';
 import { rollEvent } from './events.js';
 
 // ---------- lookups ----------
@@ -248,7 +248,7 @@ function killUnit(s, u, killer) {
     const r = s.characters[f.rulerId];
     if (killer >= 0) {
       addRenown(s, killer, 4, 'battle');
-      log(s, `☠ ${r.name} of ${f.name} falls in battle at the hands of ${s.factions[killer].short}! (+4 renown)`, 'war');
+      log(s, `☠ ${titled(r, 'ruler')} of ${f.name} falls in battle at the hands of ${s.factions[killer].short}! (+4 renown)`, 'war');
     }
     succession(s, u.owner, 'battle');
   }
@@ -308,11 +308,11 @@ export function succession(s, fid, cause) {
     f.heirId = null;
     revolt = cause === 'battle' ? 0.2 : 0.05;
     if (hasTech(s, fid, 'primogeniture')) revolt /= 2;
-    log(s, `👑 ${heir.name} (age ${heir.age}) succeeds ${old.name} as head of ${f.name}.`, fid === s.playerId ? 'info' : 'world');
+    log(s, `👑 ${titled(heir, 'ruler')} (age ${heir.age}) succeeds ${old.name} as head of ${f.name}.`, fid === s.playerId ? 'info' : 'world');
   } else {
     f.rulerId = newCharacter(s, randInt(s, 24, 40));
     revolt = 0.4;
-    log(s, `👑 ${old.name} died without an heir! A distant cousin, ${s.characters[f.rulerId].name}, seizes power in ${f.name}.`, fid === s.playerId ? 'bad' : 'world');
+    log(s, `👑 ${titled(old, 'ruler')} died without an heir! A distant cousin, ${s.characters[f.rulerId].name}, seizes power in ${f.name}.`, fid === s.playerId ? 'bad' : 'world');
   }
   if (hasTrait(s, fid, 'beloved')) revolt = 0;
   if (f.heirId == null && hasTech(s, fid, 'primogeniture')) f.heirId = newCharacter(s, randInt(s, 8, 16));
@@ -718,11 +718,11 @@ function newRound(s) {
     const heir = f.heirId != null ? s.characters[f.heirId] : null;
     if (heir) heir.age++;
     if (rand(s) < p) {
-      log(s, `⚱ ${r.name} of ${f.name} dies of old age at ${r.age}.`, f.id === s.playerId ? 'bad' : 'world');
+      log(s, `⚱ ${titled(r, 'ruler')} of ${f.name} dies of old age at ${r.age}.`, f.id === s.playerId ? 'bad' : 'world');
       succession(s, f.id, 'age');
     } else if (!heir && r.age >= 18 && r.age <= 55 && rand(s) < 0.12) {
       f.heirId = newCharacter(s, 0);
-      log(s, `👶 An heir, ${s.characters[f.heirId].name}, is born to ${f.short}.`, f.id === s.playerId ? 'good' : 'world');
+      log(s, `👶 ${sexOf(s.characters[f.heirId]) === 'f' ? 'A daughter' : 'A son'}, ${s.characters[f.heirId].name}, is born to ${f.short}.`, f.id === s.playerId ? 'good' : 'world');
     }
   }
   if (s.turn > TURN_LIMIT && !s.winner) {

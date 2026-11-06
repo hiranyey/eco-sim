@@ -3,7 +3,7 @@ import { rand, pick, randInt } from './rng.js';
 import { within } from './hex.js';
 import { makePeace, addRenown } from './rules.js';
 import { W, H, TERRAIN, TRAITS } from './data.js';
-import { addUnit, maxHp } from './world.js';
+import { addUnit, maxHp, titled, pronoun } from './world.js';
 
 const fac = (s, fid) => s.factions[fid];
 const ruler = (s, fid) => s.characters[fac(s, fid).rulerId];
@@ -65,7 +65,7 @@ export const EVENTS = {
   chronicle: {
     title: 'The Court Chronicler', weight: 6,
     find: () => ({}),
-    text: (s, fid) => `A scholar offers to write the deeds of ${ruler(s, fid).name} into a great chronicle, for a fee.`,
+    text: (s, fid) => `A scholar offers to write the deeds of ${titled(ruler(s, fid), 'ruler')} into a great chronicle, for a fee.`,
     options: [
       { label: 'Commission it', hint: '−6 gold, +2 renown', can: gold(6), fx: (s, fid) => { fac(s, fid).gold -= 6; addRenown(s, fid, 2, 'events'); } },
       { label: 'Decline', hint: 'Nothing happens', fx: () => {} },
@@ -91,7 +91,7 @@ export const EVENTS = {
       const h = heirOf(s, fid);
       return h && !h.educated && h.age >= 6 && h.age <= 16 ? { cid: h.id } : null;
     },
-    text: (s, fid, c) => `${s.characters[c.cid].name}, your heir, is of an age for tutors. What should they learn?`,
+    text: (s, fid, c) => `${titled(s.characters[c.cid], 'heir')}, your heir, is of an age for tutors. What should ${pronoun(s.characters[c.cid])} learn?`,
     options: ['brave', 'builder', 'pious'].map((t) => ({
       label: `${t === 'brave' ? 'Arms' : t === 'builder' ? 'Statecraft' : 'Faith'}`,
       hint: `−4 gold, heir becomes ${TRAITS[t].name}: ${TRAITS[t].desc}`,
@@ -162,7 +162,7 @@ export const EVENTS = {
       const ok = s.factions.filter((f) => f.alive && f.id !== fid && !rel(s, fid, f.id).war);
       return ok.length && heirOf(s, fid) ? { with: pick(s, ok).id } : null;
     },
-    text: (s, fid, c) => `${s.factions[c.with].name} proposes to wed one of theirs to your heir, sealing a long friendship.`,
+    text: (s, fid, c) => `${s.factions[c.with].name} proposes to wed one of its own to ${heirOf(s, fid) ? titled(heirOf(s, fid), 'heir') : 'your heir'}, sealing a long friendship.`,
     options: [
       { label: 'Accept the match', hint: '+2 renown; neither house can declare war on the other for 10 turns', fx: (s, fid, c) => {
         addRenown(s, fid, 2, 'events');

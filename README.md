@@ -34,7 +34,7 @@ HTTP, not opened from disk.
   - Three kills make any unit a veteran.
 - **The economy is lean.** Towns produce gold, and the hexes around them produce grain, timber and iron. Every soldier eats grain each turn. Buy and sell on a market whose prices move with every house's trades.
 - **Research and policies.** Towns produce lore (📜): 1 per town level, +1 at the capital, +2 with a Library. Spend it on three ladders of four techs each: **Warfare** (Drill Yards, Longbows, Stirrups, Trebuchets), **Economy** (Crop Rotation, Coinage, Guilds, Architecture) and **Statecraft** (Code of Laws, Primogeniture, Bureaucracy, Divine Right). A game is long enough for only about half of them. Techs unlock **policies** such as Tithes, Conscription, Warrior Code, Free Trade and Bastion Towns. Most have a downside. You start with one policy slot, and Code of Laws and Bureaucracy add more.
-- **Dynasties matter.** Rulers have traits, age a year each turn, and die. Educate your heir through events. A ruler slain in battle can set your towns revolting, and dying without an heir is worse.
+- **Dynasties matter.** Every king, queen, prince and princess has a gender, a matching name, a generated portrait and two traits. Rulers age a year each turn, and die. Educate your heir through events. A ruler slain in battle can set your towns revolting, and dying without an heir is worse.
 - **Diplomacy is simple and sharp.** Everyone starts at peace. AI houses declare war when they smell weakness, and they gang up on whoever is about to win. You can declare war, or buy peace with tribute.
 - **Each house plays differently:**
   - Varr has cheap iron troops.
