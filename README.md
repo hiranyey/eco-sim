@@ -11,7 +11,7 @@ npm start      # http://localhost:8080
 npm test       # engine tests (Node 20+)
 ```
 
-No dependencies and no build step. Any static file server works; the files just need to be served over
+No dependencies, no build step and no image files: all the art is drawn in code. Any static file server works; the files just need to be served over
 HTTP, not opened from disk.
 
 ## How it plays
@@ -55,6 +55,9 @@ js/rules.js                 movement, combat, economy, market, diplomacy, succes
 js/events.js                court events
 js/ai.js                    AI opponents (a generator that yields one visible action at a time)
 js/board.js                 SVG board rendering and animation
+js/art/painter.js           procedural terrain painter: blended biomes, hill shading, coasts, forests, farmland, roads
+js/art/sprites.js           faction crests, unit emblems, towns, shrines (SVG)
+js/art/icons.js             interface icon set
 js/main.js                  UI controller: input, panels, modals, turn flow, saving
 js/audio.js                 Web Audio sound effects
 tests/hexmarch.test.mjs     determinism, combat preview == result, full AI games, invariants
