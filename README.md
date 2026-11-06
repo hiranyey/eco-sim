@@ -54,6 +54,14 @@ HTTP, not opened from disk.
   - Thorne has strong archers and forest defence.
   - Ashkar has fast cavalry.
 
+- **Fog of war** (switch it off on the start screen if you prefer):
+  - **Sight:** you only see what your troops and towns can see. Most units see 2 hexes, cavalry 3, and a unit on a hill sees 1 more. Towns watch 2 hexes around them, and capitals 3.
+  - **Forest cover:** troops in forest show only to someone standing next to them.
+  - **Memory:** explored land stays on the map, dimmed, and towns there show their last-known owner.
+  - **Ambushes:** a march that runs into hidden enemies halts where they are found. It can't be undone, but the unit can still attack.
+  - **Shared sight:** allies and vassals share what they see.
+  - **The AI:** computer houses are not limited by fog.
+
 **Map:** zoom with the mouse wheel, pinch or the `+`/`−` buttons, and drag to pan. Phones start zoomed in on your capital.
 
 **Quality of life:** Undo move (`U`), Danger zones that show every hex enemies can strike next turn (`D`), Next unit (`N`), a "While you waited" report after each enemy turn, an early-goals checklist, autosave, three difficulty levels, three enemy-turn speeds, and synthesized sound effects.
@@ -67,6 +75,7 @@ js/hex.js                   hex-grid maths
 js/world.js                 procedural map and initial state
 js/rules.js                 movement, combat, economy, market, war and peace, succession, turn flow
 js/diplomacy.js             opinions and memories, treaties, vassals, negotiated deals, calls to arms
+js/fog.js                   fog of war: sight, forest cover, explored land, remembered towns
 js/events.js                court events, envoys and calls to arms
 js/ai.js                    AI opponents (a generator that yields one visible action at a time)
 js/board.js                 SVG board rendering and animation
@@ -79,6 +88,7 @@ js/main.js                  UI controller: input, panels, modals, turn flow, sav
 js/audio.js                 Web Audio sound effects
 tests/hexmarch.test.mjs     determinism, combat preview == result, full AI games, invariants
 tests/diplomacy.test.mjs    opinions, deals, oaths, alliances, vassals, save migration
+tests/fog.test.mjs          sight, memory, forest cover, ambushes, shared sight
 ```
 
 The engine is plain JSON state with a seeded RNG, so it runs headless in Node. The tests play complete

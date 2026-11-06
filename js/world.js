@@ -1,4 +1,5 @@
 // Procedural map and initial game state.
+import { newFog } from './fog.js';
 import { rand, randInt, pick, shuffle, hashSeed } from './rng.js';
 import { neighbors, distance, within } from './hex.js';
 import { W, H, TERRAIN, FACTIONS, UNITS, GOODS, DIFFICULTY, NAMES, TITLES, PRONOUNS, PLACE_A, PLACE_B, TRAITS } from './data.js';
@@ -123,13 +124,13 @@ export function pronoun(c, kind = 'sub') {
   return PRONOUNS[sexOf(c)][kind];
 }
 
-export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'normal' } = {}) {
+export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'normal', fog = true } = {}) {
   const seedNum = typeof seed === 'number' ? seed >>> 0 : hashSeed(seed);
   const s = {
     version: 1, seed: String(seed), rng: seedNum, turn: 1, current: 0, playerId: playerFaction, difficulty,
     W, H, tiles: [], cities: [], units: [], factions: [], characters: {}, relations: {},
     market: Object.fromEntries(Object.entries(GOODS).map(([k, g]) => [k, g.base])),
-    log: [], pendingEvents: [], winner: null, nextId: 1, order: [], memory: {},
+    log: [], pendingEvents: [], winner: null, nextId: 1, order: [], memory: {}, fog: newFog(fog),
   };
 
   let capitals = null;

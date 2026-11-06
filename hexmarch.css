@@ -702,3 +702,16 @@ button.wide { width: 100%; margin-top: 4px; }
   .tabs button { padding-left: 0; padding-right: 0; }
   .tabs button span { font-size: 9.5px; letter-spacing: 0; }
 }
+
+/* ---------- fog of war ---------- */
+.fog-dark polygon { fill: url(#fogPat); stroke: url(#fogPat); stroke-width: 2; }
+.fog-dark { opacity: 0.97; }
+.fog-dim polygon { fill: #08101a; }
+.fog-dim { opacity: 0.46; }
+.layer-fog { pointer-events: none; }
+.unit.fading { opacity: 0; transition: opacity 0.3s; }
+.layer-marks { pointer-events: none; }
+.fog-card b { display: flex; align-items: center; gap: 6px; }
+.fog-card .ico, .fog-note .ico { width: 16px; height: 16px; color: #8ea3bd; }
+.fog-note { display: flex; gap: 6px; align-items: center; color: #9fb0c6; margin: 0 0 8px; }
+.seg.fogsel .ico { width: 15px; height: 15px; }

@@ -135,7 +135,7 @@ export const TREATIES = {
   peace: { name: 'Peace', desc: 'End the war with a truce' },
   pact: { name: 'Non-aggression pact', desc: `Neither may attack the other for ${PACT_TURNS} turns without breaking an oath` },
   trade: { name: 'Trade agreement', desc: 'Both earn gold every turn from the other\'s towns' },
-  alliance: { name: 'Alliance', desc: 'Each defends the other, and armies may cross allied land' },
+  alliance: { name: 'Alliance', desc: 'Each defends the other, armies may cross allied land, and you share sight' },
   marriage: { name: 'Royal marriage', desc: 'Your heir weds into their house: lasting goodwill, a pact and +2 renown' },
   vassal: { name: 'Swear fealty to you', desc: 'They pay you a quarter of their gold, fight your wars, and give you +1 renown a turn' },
   joinwar: { name: 'Join your war', desc: 'They declare war on your enemy' },

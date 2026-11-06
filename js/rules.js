@@ -7,6 +7,7 @@ import {
 } from './data.js';
 import { addUnit, maxHp, newCharacter, titled, sexOf } from './world.js';
 import { rollEvent } from './events.js';
+import { fogOn, vision, unitSeen, reveal } from './fog.js';
 import {
   friendly, breakOath, rallyAllies, vassalsOf, tradeGold, diplomacyRound, remember,
 } from './diplomacy.js';
@@ -62,10 +63,10 @@ function blockedByPeace(s, u, tile) {
   return o != null && o >= 0 && o !== u.owner && !hostile(s, u.owner, o) && !friendly(s, u.owner, o);
 }
 
-export function inZoc(s, owner, tile) {
+export function inZoc(s, owner, tile, seen = null) {
   for (const n of neighbors(W, H, tile)) {
     const e = unitAt(s, n);
-    if (e && hostile(s, owner, e.owner)) return true;
+    if (e && hostile(s, owner, e.owner) && (!seen || seen(e))) return true;
   }
   return false;
 }
@@ -74,6 +75,8 @@ export function inZoc(s, owner, tile) {
 export function reachable(s, u) {
   const out = new Map();
   if (u.moved || u.owner < 0) return out;
+  // Under fog the player plans with what they can see: hidden enemies neither block nor pin the plan.
+  const seen = seenBy(s, u.owner);
   const best = new Map([[u.tile, { rem: movePoints(s, u), prev: -1 }]]);
   const queue = [u.tile];
   while (queue.length) {
@@ -85,10 +88,10 @@ export function reachable(s, u) {
       const T = TERRAIN[s.tiles[n].t];
       if (!T.pass || blockedByPeace(s, u, n)) continue;
       const occ = unitAt(s, n);
-      if (occ && occ.owner !== u.owner) continue;
+      if (occ && occ.owner !== u.owner && (!seen || seen(occ))) continue;
       let r = rem - 1;
       if (T.move > 1) r = 0; // rough ground ends movement
-      if (inZoc(s, u.owner, n)) r = 0; // enemies pin you down
+      if (inZoc(s, u.owner, n, seen)) r = 0; // enemies pin you down
       const prev = best.get(n);
       if (!prev || r > prev.rem) {
         best.set(n, { rem: r, prev: cur });
@@ -96,8 +99,18 @@ export function reachable(s, u) {
       }
     }
   }
-  for (const [t, v] of best) if (t !== u.tile && !unitAt(s, t)) out.set(t, v);
+  for (const [t, v] of best) {
+    const occ = unitAt(s, t);
+    if (t !== u.tile && (!occ || (seen && !seen(occ)))) out.set(t, v);
+  }
   return out;
+}
+
+// A visibility test for the player's units under fog, or null when everything is in view.
+function seenBy(s, fid) {
+  if (!fogOn(s) || fid !== s.playerId) return null;
+  const vis = vision(s, fid);
+  return (x) => unitSeen(s, fid, x, vis);
 }
 
 export function pathTo(reach, from, to) {
@@ -162,7 +175,8 @@ export function canAttack(s, u) {
 export function attackTargets(s, u) {
   if (!canAttack(s, u)) return [];
   const range = UNITS[u.type].range;
-  return s.units.filter((e) => hostile(s, u.owner, e.owner) && distance(W, u.tile, e.tile) <= range);
+  const seen = seenBy(s, u.owner);
+  return s.units.filter((e) => hostile(s, u.owner, e.owner) && distance(W, u.tile, e.tile) <= range && (!seen || seen(e)));
 }
 
 // Exact outcome of an attack. Deterministic so the UI can preview it.
@@ -189,9 +203,29 @@ export function moveUnit(s, uid, dest) {
   if (!reach.has(dest)) return 'Cannot move there';
   const path = pathTo(reach, u.tile, dest);
   const from = u.tile;
-  u.tile = dest;
+  // Under fog, a march can run into enemies nobody saw: it halts where they are found.
+  let walked = path;
+  let ambush = null;
+  if (seenBy(s, u.owner)) {
+    walked = [];
+    for (const t of path) {
+      const occ = unitAt(s, t);
+      if (occ && occ.owner !== u.owner) { ambush = 'blocked'; break; }
+      walked.push(t);
+      if (t !== dest && inZoc(s, u.owner, t)) { ambush = 'spotted'; break; }
+    }
+    // Never stop on top of a friend: fall back to the last free hex.
+    while (walked.length && unitAt(s, walked[walked.length - 1])) walked.pop();
+  }
+  const end = walked.length ? walked[walked.length - 1] : from;
+  u.tile = end;
   u.moved = true;
-  const result = { type: 'move', uid, from, path, capture: null };
+  const result = { type: 'move', uid, from, path: walked, capture: null, ambush };
+  if (ambush) {
+    u.attacked = attackTargets(s, u).length === 0;
+    if (u.owner === s.playerId) reveal(s);
+    return result;
+  }
   const c = cityAt(s, dest);
   if (c && c.owner !== u.owner && hostile(s, u.owner, c.owner)) {
     result.capture = capture(s, u, c);
@@ -729,6 +763,7 @@ export function beginTurn(s, fid) {
   if (rn.building) addRenown(s, fid, rn.building, 'building');
   if (rn.vassals) addRenown(s, fid, rn.vassals, 'vassals');
   rollEvent(s, fid);
+  if (fid === s.playerId) reveal(s);
   checkVictory(s);
 }
 
@@ -804,8 +839,9 @@ export function checkVictory(s) {
 // Hexes that enemy armies (at war with fid) could strike on their next turn.
 export function threatTiles(s, fid) {
   const out = new Set();
+  const seen = seenBy(s, fid);
   for (const e of s.units) {
-    if (e.owner < 0 || !hostile(s, fid, e.owner)) continue;
+    if (e.owner < 0 || !hostile(s, fid, e.owner) || (seen && !seen(e))) continue;
     const U = UNITS[e.type];
     const from = new Map([[e.tile, movePoints(s, e)]]);
     if (!U.siege) {

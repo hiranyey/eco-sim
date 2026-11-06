@@ -3,6 +3,7 @@ import { center, corners, mapSize, neighborDir, HEX } from './hex.js';
 import { REBEL_COLOR, UNITS } from './data.js';
 import { maxHp } from './world.js';
 import { paintTerrain } from './art/painter.js';
+import { reveal, unitSeen, knownOwner } from './fog.js';
 import { EMBLEM, townSprite, ribbon, shrineSprite, shade } from './art/sprites.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -17,6 +18,8 @@ export function createBoard(svg, handlers) {
   const units = new Map();
   let layers = {};
   let hoverPoly = null;
+  let fogKey = '';
+  let vis = null; // what the player can see this frame (null: no fog)
   // Camera: the visible part of the map as an SVG viewBox.
   let full = [0, 0, 1, 1];
   let view = [0, 0, 1, 1];
@@ -47,13 +50,18 @@ export function createBoard(svg, handlers) {
       <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="rgb(200 40 25 / 0.14)"/><rect width="2.6" height="7" fill="rgb(230 60 40 / 0.42)"/></pattern>
       <pattern id="glint" width="60" height="44" patternUnits="userSpaceOnUse"><path d="M6,10q4,-2.6 8,0M30,30q5,-3 10,0M44,8q3,-2 6,0M14,36q3,-2 6,0" fill="none" stroke="rgb(235 248 255 / 0.55)" stroke-width="0.9" stroke-linecap="round"/></pattern>
       <radialGradient id="cloud"><stop offset="0" stop-color="#0a1420" stop-opacity="0.24"/><stop offset="0.6" stop-color="#0a1420" stop-opacity="0.1"/><stop offset="1" stop-color="#0a1420" stop-opacity="0"/></radialGradient>
+      <filter id="fogBlur" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="4.5"/></filter>
+      <radialGradient id="mist"><stop offset="0" stop-color="#3b4b60" stop-opacity="0.55"/><stop offset="1" stop-color="#3b4b60" stop-opacity="0"/></radialGradient>
+      <pattern id="fogPat" width="150" height="110" patternUnits="userSpaceOnUse"><rect width="150" height="110" fill="#0d141e"/>
+        <ellipse cx="30" cy="26" rx="42" ry="22" fill="url(#mist)"/><ellipse cx="112" cy="70" rx="50" ry="24" fill="url(#mist)"/><ellipse cx="60" cy="92" rx="34" ry="16" fill="url(#mist)"/><ellipse cx="140" cy="12" rx="30" ry="14" fill="url(#mist)"/>
+        <path d="M8,60q14,-6 28,0t28,0M84,30q12,-5 24,0t24,0M96,100q10,-4 20,0" fill="none" stroke="#5a6a80" stroke-opacity="0.22" stroke-width="1.2" stroke-linecap="round"/></pattern>
       <radialGradient id="spark"><stop offset="0" stop-color="#fff8d8"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
       ${owners.map(([id, c]) => `<radialGradient id="tok${id}" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="${shade(c, 0.28)}"/><stop offset="0.65" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -0.45)}"/></radialGradient>`).join('')}
       <clipPath id="waterClip">${s.tiles.map((t, i) => (t.t === 'water' ? `<polygon points="${pts(corners(...center(s.W, i), HEX + 1))}"/>` : '')).join('')}</clipPath>
       <clipPath id="mapClip"><rect x="3" y="3" width="${(w - 6).toFixed(0)}" height="${(h - 6).toFixed(0)}" rx="3"/></clipPath>
     </defs>`;
     layers = {};
-    for (const name of ['terrain', 'water', 'grid', 'tint', 'borders', 'clouds', 'hl', 'hover', 'sites', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
+    for (const name of ['terrain', 'water', 'grid', 'tint', 'borders', 'clouds', 'hl', 'sites', 'fog', 'marks', 'hover', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
     const art = paintTerrain(s);
     el('image', { href: art.url, x: 0, y: 0, width: art.width, height: art.height, preserveAspectRatio: 'none' }, layers.terrain);
     // Atmosphere: glints drifting over open water, cloud shadows drifting over everything.
@@ -61,6 +69,8 @@ export function createBoard(svg, handlers) {
     el('rect', { x: -120, y: -60, width: art.width + 240, height: art.height + 120, fill: 'url(#glint)', class: 'glints' }, layers.water);
     el('rect', { x: -120, y: -60, width: art.width + 240, height: art.height + 120, fill: 'url(#glint)', class: 'glints two' }, layers.water);
     layers.clouds.setAttribute('clip-path', 'url(#mapClip)');
+    layers.fog.setAttribute('clip-path', 'url(#mapClip)');
+    fogKey = '';
     for (let k = 0; k < 5; k++) {
       const cy = (art.height * (k + 0.5)) / 5 + ((k * 37) % 40) - 20;
       const rx = 90 + ((k * 53) % 70);
@@ -226,12 +236,16 @@ export function createBoard(svg, handlers) {
   const escapeXml = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const colorOf = (owner) => (owner < 0 ? REBEL_COLOR : s.factions[owner].color);
 
+  const seenTile = (i) => !vis || !!s.fog.explored[i];
+
   function render(ui) {
     if (!s) return;
-    // Territory tint and borders
+    vis = handlers.interactive === false ? null : reveal(s); // the start-screen preview shows the whole map
+    drawFog();
+    // Territory tint and borders, as the player last saw them
     layers.tint.innerHTML = '';
     layers.borders.innerHTML = '';
-    const ownerOf = (i) => (s.tiles[i].city >= 0 ? s.cities[s.tiles[i].city].owner : null);
+    const ownerOf = (i) => (s.tiles[i].city >= 0 && seenTile(i) ? knownOwner(s, s.cities[s.tiles[i].city], vis) : null);
     const edges = new Map();
     for (let i = 0; i < s.tiles.length; i++) {
       const o = ownerOf(i);
@@ -256,17 +270,18 @@ export function createBoard(svg, handlers) {
     // Towns and shrines
     layers.sites.innerHTML = '';
     s.tiles.forEach((t, i) => {
-      if (!t.shrine) return;
+      if (!t.shrine || !seenTile(i)) return;
       const [cx, cy] = center(s.W, i);
-      const holder = s.units.find((u) => u.tile === i);
+      const holder = s.units.find((u) => u.tile === i && (!vis || unitSeen(s, s.playerId, u, vis)));
       const held = holder && holder.owner >= 0;
       el('circle', { cx, cy, r: 30, fill: 'url(#shrineGlow)', class: 'shrine-glow' }, layers.sites);
       const g = el('g', { class: `shrine${held ? ' held' : ''}`, transform: `translate(${cx},${cy})` }, layers.sites);
       g.innerHTML = shrineSprite(held ? colorOf(holder.owner) : null);
     });
-    for (const c of s.cities) drawCity(c);
+    for (const c of s.cities) if (seenTile(c.tile)) drawCity(c);
     // Highlights
     layers.hl.innerHTML = '';
+    layers.marks.innerHTML = '';
     layers.rings.innerHTML = '';
     if (ui.danger) {
       for (const t of ui.danger) {
@@ -290,10 +305,10 @@ export function createBoard(svg, handlers) {
           d += `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`;
         }
       }
-      if (d) { el('path', { d, class: 'reach-edge-under' }, layers.hl); el('path', { d, class: 'reach-edge' }, layers.hl); }
+      if (d) { el('path', { d, class: 'reach-edge-under' }, layers.marks); el('path', { d, class: 'reach-edge' }, layers.marks); }
       for (const t of ui.reach.keys()) {
         const [cx, cy] = center(s.W, t);
-        el('circle', { cx, cy, r: 3.2, class: 'reach-dot' }, layers.hl);
+        el('circle', { cx, cy, r: 3.2, class: 'reach-dot' }, layers.marks);
       }
     }
     if (ui.selectedTile != null) {
@@ -309,10 +324,31 @@ export function createBoard(svg, handlers) {
 
   function drawCity(c) {
     const [cx, cy] = center(s.W, c.tile);
-    const held = s.units.some((u) => u.tile === c.tile);
+    const held = s.units.some((u) => u.tile === c.tile && (!vis || unitSeen(s, s.playerId, u, vis)));
+    const owner = knownOwner(s, c, vis);
     const g = el('g', { class: `town lvl${c.level}`, transform: `translate(${cx},${cy - 4})` }, layers.sites);
-    g.innerHTML = `<g transform="translate(${held ? -8 : 0},0)">${townSprite(c, colorOf(c.owner))}</g>${ribbon(escapeXml(c.name), colorOf(c.owner), 28)}`;
+    g.innerHTML = `<g transform="translate(${held ? -8 : 0},0)">${townSprite({ ...c, owner }, colorOf(owner))}</g>${ribbon(escapeXml(c.name), colorOf(owner), 28)}`;
   }
+
+  // Unexplored land lies under dark cloud; explored land out of sight is dimmed.
+  function drawFog() {
+    if (!vis) { if (fogKey) { layers.fog.innerHTML = ''; fogKey = ''; } return; }
+    let key = '';
+    for (let i = 0; i < s.tiles.length; i++) key += vis.tiles.has(i) ? 'v' : s.fog.explored[i] ? 'e' : 'u';
+    if (key === fogKey) return;
+    fogKey = key;
+    layers.fog.innerHTML = '';
+    const dim = el('g', { class: 'fog-dim', filter: 'url(#fogBlur)' }, layers.fog);
+    const dark = el('g', { class: 'fog-dark', filter: 'url(#fogBlur)' }, layers.fog);
+    for (let i = 0; i < s.tiles.length; i++) {
+      if (key[i] === 'v') continue;
+      const [cx, cy] = center(s.W, i);
+      el('polygon', { points: pts(corners(cx, cy, HEX + 3)) }, key[i] === 'e' ? dim : dark);
+    }
+  }
+
+  const isFogged = (tile) => !!vis && !vis.tiles.has(tile);
+  const isExplored = (tile) => seenTile(tile);
 
   // Units standing in a town step down and shrink a little so the town stays visible.
   function spot(tile) {
@@ -340,7 +376,9 @@ export function createBoard(svg, handlers) {
 
   function renderUnits(ui) {
     const alive = new Set();
+    const exists = new Set(s.units.map((u) => u.id));
     for (const u of s.units) {
+      if (vis && !unitSeen(s, s.playerId, u, vis)) continue;
       alive.add(u.id);
       let g = units.get(u.id);
       if (!g) {
@@ -375,7 +413,12 @@ export function createBoard(svg, handlers) {
       g.classList.toggle('veteran', !!u.vet);
     }
     for (const [id, g] of units) {
-      if (!alive.has(id)) {
+      if (!alive.has(id) && exists.has(id)) {
+        // Slipped out of sight: fade away quietly.
+        units.delete(id);
+        g.classList.add('fading');
+        setTimeout(() => g.remove(), 300);
+      } else if (!alive.has(id)) {
         units.delete(id);
         const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(g.style.transform);
         if (m) puff(+m[1], +m[2]);
@@ -400,6 +443,7 @@ export function createBoard(svg, handlers) {
   async function animateAttack(res, speed = 1) {
     const g = units.get(res.uid);
     const tg = units.get(res.targetId);
+    if (!g && !tg && isFogged(res.from) && isFogged(res.at)) return; // a fight nobody of yours saw
     const [ax, ay] = center(s.W, res.from);
     const [tx, ty] = center(s.W, res.at);
     if (g) {
@@ -533,7 +577,7 @@ export function createBoard(svg, handlers) {
   return {
     build, render, animateMove, animateAttack, float, pulse, showPath, setHover, shockwave, sparkle,
     zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: () => { view = [...full]; applyView(); },
-    centerOn, zoomLevel, tileCenter: (t) => center(s.W, t),
+    centerOn, zoomLevel, tileCenter: (t) => center(s.W, t), isFogged, isExplored,
     zoomTo: (z, tile) => {
       const nz = Math.min(MAX_ZOOM, Math.max(1, z));
       const [x, y] = center(s.W, tile);

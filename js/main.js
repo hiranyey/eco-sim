@@ -24,6 +24,7 @@ import { portrait } from './art/portrait.js';
 import { vignette } from './art/vignettes.js';
 import { maxHp } from './world.js';
 import { sfx, isMuted, setMuted } from './audio.js';
+import { fogOn, unitSeen, knownOwner, newFog, explored } from './fog.js';
 
 const SAVE_KEY = 'hexmarch-save-v1';
 const PREFS_KEY = 'hexmarch-prefs';
@@ -32,7 +33,7 @@ const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const noHover = window.matchMedia?.('(hover: none)').matches;
 
-let prefs = { speed: 'normal', seenTutorial: false };
+let prefs = { speed: 'normal', seenTutorial: false, fog: true };
 try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* ignore */ }
 const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } };
 const SPEEDS = { normal: 1, fast: 0.5, instant: 0 };
@@ -123,6 +124,11 @@ function mountGame(s) {
 
 const myTurn = () => !ui.busy && !ui.s.winner && currentFaction(ui.s) === ui.s.playerId && !ui.s.pendingEvents.length;
 const me = () => ui.s.factions[ui.s.playerId];
+// The unit on a hex as the player sees it: hidden enemies under fog are not there.
+const seenUnitAt = (tile) => {
+  const x = tile != null ? unitAt(ui.s, tile) : null;
+  return x && unitSeen(ui.s, ui.s.playerId, x) ? x : null;
+};
 
 function render() {
   const s = ui.s;
@@ -206,6 +212,16 @@ function unitCard(u) {
     ${status ? `<p class="status">${status}</p>` : ''}
     ${mine && myTurn() && (!u.moved || !u.attacked) ? '<button class="ghost small" data-act="hold" title="Skip this unit; units that hold still heal (F)">Hold position</button>' : ''}
   </div>`;
+}
+
+function fogCityCard(c) {
+  const s = ui.s;
+  const o = knownOwner(s, c, null);
+  const owner = o < 0 ? { name: 'Free town (rebels)', color: '#6d6a75' } : s.factions[o];
+  const k = s.fog.known[c.id];
+  return `<div class="card city-card" style="--c:${owner.color}">
+    <div class="row"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite({ ...c, owner: o, level: k?.level ?? c.level }, owner.color)}</svg><div><b>${esc(c.name)}</b><div class="muted">Last seen: ${esc(owner.name)} · Level ${k?.level ?? c.level}</div></div></div>
+    <p class="muted small">Its garrison and current owner are hidden by the fog.</p></div>`;
 }
 
 function cityCard(c) {
@@ -297,12 +313,17 @@ function paneSelect() {
         <p>Win renown by taking towns ${'(+2/+4/+8)'}, holding shrines <span class="gold">✦</span> (+1 per turn each), winning battles and building. First to <b>${RENOWN_TO_WIN}</b> wins.</p>
       </div>`;
   }
-  const u = unitAt(s, ui.selectedTile);
-  const c = cityAt(s, ui.selectedTile);
   const t = s.tiles[ui.selectedTile];
+  if (!explored(s, ui.selectedTile)) {
+    return `<div class="card fog-card"><b>${icon('fog')}Unexplored</b><p class="muted small">Nobody of yours has seen this land. Send a unit to scout it: cavalry see three hexes, other troops two, and anyone on a hill one more.</p></div>${goals()}`;
+  }
+  const u = seenUnitAt(ui.selectedTile);
+  const c = cityAt(s, ui.selectedTile);
+  const fogged = fogOn(s) && ui.board.isFogged(ui.selectedTile);
   let out = '';
+  if (fogged) out += `<p class="small fog-note">${icon('fog')}Out of sight: what you see here is what your scouts last reported.</p>`;
   if (u) out += unitCard(u);
-  if (c) out += cityCard(c);
+  if (c) out += fogged && c.owner !== s.playerId ? fogCityCard(c) : cityCard(c);
   if (!u && !c) {
     const T = TERRAIN[t.t];
     out += `<div class="card"><b>${T.name}</b><p class="muted small">${T.pass ? `Movement: ${T.move > 1 ? 'ends your move when entered' : 'normal'}. Defence ×${T.def}.` : 'Impassable.'} ${t.city >= 0 ? `Worked by ${esc(s.cities[t.city].name)}: yields ${icon(T.yields)}.` : ''}</p>
@@ -672,7 +693,7 @@ function select(tile) {
   const s = ui.s;
   ui.selectedTile = tile;
   ui.armedTarget = null;
-  const u = tile != null ? unitAt(s, tile) : null;
+  const u = seenUnitAt(tile);
   if (u && u.owner === s.playerId && myTurn()) {
     ui.selectedUnit = u.id;
     ui.reach = reachable(s, u);
@@ -711,7 +732,7 @@ async function onTileClick(tile) {
     if (ui.reach?.has(tile)) return doMove(sel, tile);
   }
   sfx.select();
-  select(tile === ui.selectedTile && !unitAt(s, tile) ? null : tile);
+  select(tile === ui.selectedTile && !seenUnitAt(tile) ? null : tile);
 }
 
 function onZoom(z) {
@@ -742,11 +763,13 @@ function onTileHover(tile, e) {
     hideTip();
   } else {
     ui.board.showPath(null);
-    const u = tile != null ? unitAt(s, tile) : null;
-    const c = tile != null ? cityAt(s, tile) : null;
+    const u = seenUnitAt(tile);
+    const known = tile != null && explored(s, tile);
+    const c = known ? cityAt(s, tile) : null;
     if (u && u.owner !== s.playerId && e) showUnitTip(u, e);
     else if (c && e && !sel) showTownTip(c, e);
-    else if (tile != null && s.tiles[tile].shrine && e && !sel) tipAt(`<div class="pv"><div class="pv-h">${icon('shrine')} Ancient shrine</div><div class="small">Stand a unit here at the start of your turn for +1 renown.</div></div>`, e);
+    else if (tile != null && !known && e && !sel) tipAt(`<div class="pv"><div class="pv-h">${icon('fog')} Unexplored</div><div class="small">Scout it to see what lies here.</div></div>`, e);
+    else if (known && s.tiles[tile].shrine && e && !sel) tipAt(`<div class="pv"><div class="pv-h">${icon('shrine')} Ancient shrine</div><div class="small">Stand a unit here at the start of your turn for +1 renown.</div></div>`, e);
     else hideTip();
   }
 }
@@ -811,12 +834,14 @@ function peaceWords(fid) {
 
 function showTownTip(c, e) {
   const s = ui.s;
-  const owner = c.owner < 0 ? null : s.factions[c.owner];
-  const g = unitAt(s, c.tile);
-  const status = c.owner === s.playerId ? 'Your town' : !owner ? 'Free town: walk in to claim it' : hostile(s, s.playerId, c.owner) ? 'At war: take it when it is empty' : peaceWords(c.owner);
+  const fogged = fogOn(s) && ui.board.isFogged(c.tile);
+  const o = fogged ? knownOwner(s, c, null) : c.owner;
+  const owner = o < 0 ? null : s.factions[o];
+  const g = fogged ? null : unitAt(s, c.tile);
+  const status = fogged ? 'Out of sight: last seen like this' : c.owner === s.playerId ? 'Your town' : !owner ? 'Free town: walk in to claim it' : hostile(s, s.playerId, c.owner) ? 'At war: take it when it is empty' : peaceWords(c.owner);
   tipAt(`<div class="pv town-tip"><div class="pv-h">${owner ? crest(owner.key, owner.color, 'crest sm') : ''}${esc(c.name)}${c.capital ? ' <span class="tag">Capital</span>' : ''}</div>
     <div class="small">${owner ? esc(owner.name) : 'Rebels'} · Level ${c.level}${c.buildings.length ? ` · ${c.buildings.map((b) => BUILDINGS[b].name).join(', ')}` : ''}</div>
-    <div class="small">${g ? `Garrison: ${UNITS[g.type].name} (${g.hp} HP)` : 'No garrison'}</div>
+    <div class="small">${fogged ? 'Garrison unknown' : g ? `Garrison: ${UNITS[g.type].name} (${g.hp} HP)` : 'No garrison'}</div>
     <div class="small muted">${status}</div></div>`, e);
 }
 
@@ -830,11 +855,12 @@ function showUnitTip(u, e) {
 
 async function doMove(u, tile) {
   const s = ui.s;
-  const path = [...pathTo(ui.reach, u.tile, tile)];
   const snapshot = JSON.stringify(s);
   const res = moveUnit(s, u.id, tile);
   if (typeof res === 'string') return toast(res);
-  ui.undo = res.capture ? null : { snapshot, uid: u.id };
+  const path = res.path;
+  // An ambush reveals what was hidden, so it cannot be taken back.
+  ui.undo = res.capture || res.ambush ? null : { snapshot, uid: u.id };
   s.tut = { ...(s.tut ?? {}), moved: true };
   ui.busy = true;
   ui.reach = null;
@@ -844,6 +870,11 @@ async function doMove(u, tile) {
   sfx.move();
   await ui.board.animateMove(u.id, path, 110);
   ui.busy = false;
+  if (res.ambush) {
+    sfx.bad();
+    ui.board.float(u.tile, 'Ambush!', 'kill');
+    toast(res.ambush === 'blocked' ? `Your ${UNITS[u.type].name} ran into enemies hidden in the fog and halted.` : `Your ${UNITS[u.type].name} spotted hidden enemies and halted.`);
+  }
   if (res.capture) onCapture(res.capture, tile);
   afterAction();
   // Keep the unit selected so it can attack right away.
@@ -1117,6 +1148,7 @@ function showHelp(first) {
       <div><b>${icon('attack')}Units</b><p>Click a unit: lit hexes are where it can go, red rings are enemies it can hit. <b>Hover an enemy for the exact outcome</b>: every fight is predictable. Forests and hills end your move but defend well. Moving next to an enemy stops you (zone of control).</p></div>
       <div><b>${icon('castle')}Towns</b><p>Click your town to recruit (one unit per turn, two with Barracks), grow it, and add buildings. Each soldier eats 1 grain per turn. Run out and your army starves.</p></div>
       <div><b>${icon('lore')}Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
+      <div><b>${icon('fog')}Fog of war</b><p>You only see what your troops and towns can see: two hexes for most units, three for cavalry, one more from a hill. Enemies in forest show only when you stand next to them. March blind and you may run into an ambush. Allies and vassals share their sight.</p></div>
       <div><b>${icon('handshake')}Diplomacy</b><p>Every house has an opinion of you, and you can see each reason behind it. At the negotiation table, trade gold, towns and techs, or sign pacts, trade agreements, alliances and royal marriages. Crush a rival and it may swear fealty. Break an oath and every court remembers.</p></div>
       <div><b>${icon('scales')}Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
       <div><b>${icon('renown')}Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
@@ -1144,7 +1176,7 @@ function showMenu() {
   m.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => { prefs.speed = b.dataset.speed; savePrefs(); showMenu(); }));
   m.querySelector('[data-menu="new"]').addEventListener('click', () => { clearSave(); showStart(); });
   m.querySelector('[data-menu="restart"]').addEventListener('click', () => {
-    const s = newGame({ seed: ui.s.seed, playerFaction: ui.s.playerId, difficulty: ui.s.difficulty });
+    const s = newGame({ seed: ui.s.seed, playerFaction: ui.s.playerId, difficulty: ui.s.difficulty, fog: fogOn(ui.s) });
     beginTurn(s, currentFaction(s));
     closeModal();
     mountGame(s);
@@ -1222,6 +1254,7 @@ function loadSave() {
     for (const f of s?.factions ?? []) {
       f.lore ??= 0; f.techs ??= []; f.policies ??= []; f.research ??= null;
     }
+    if (s) s.fog ??= newFog(false); // saves from before fog of war play on without it
     return s ? ensureDiplomacy(s) : s;
   } catch { return null; }
 }
@@ -1229,7 +1262,7 @@ function loadSave() {
 // ---------------------------------------------------------------- start screen
 function showStart() {
   const saved = loadSave();
-  let choice = { faction: 0, difficulty: 'normal', seed: Math.random().toString(36).slice(2, 8) };
+  let choice = { faction: 0, difficulty: 'normal', seed: Math.random().toString(36).slice(2, 8), fog: prefs.fog !== false };
   root.innerHTML = `<div class="backdrop"></div><div class="start">
     <div class="hero">
       <div class="hero-crests">${FACTIONS.map((F) => crest(F.key, F.color, 'crest md')).join('')}</div>
@@ -1246,6 +1279,8 @@ function showStart() {
           ${crest(F.key, F.color, 'crest lg')}<span class="house-txt"><b>${F.name}</b><i>“${F.motto}”</i><small><b>${F.bonus}:</b> ${F.bonusDesc}</small></span></button>`).join('')}</div>
         <h3>Difficulty</h3>
         <div class="seg diff">${Object.entries(DIFFICULTY).map(([k, D]) => `<button data-diff="${k}">${D.name}</button>`).join('')}</div>
+        <h3>Fog of war</h3>
+        <div class="seg fogsel"><button data-fog="1">${icon('fog')}On: scout to see</button><button data-fog="0">Off: see everything</button></div>
         <button class="primary big" data-s="go">Ride out</button>
         ${saved && !saved.winner ? `<button class="ghost" data-s="continue">Continue: ${esc(saved.factions[saved.playerId].name)}, turn ${saved.turn}</button>` : ''}
         <a class="classic" href="classic/">Prefer slow, sprawling grand strategy? Play Crowns &amp; Ledgers →</a>
@@ -1263,6 +1298,7 @@ function showStart() {
     if (art && bd) bd.style.backgroundImage = `url(${art})`;
     root.querySelectorAll('.house').forEach((b) => b.classList.toggle('on', +b.dataset.house === choice.faction));
     root.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === choice.difficulty));
+    root.querySelectorAll('[data-fog]').forEach((b) => b.classList.toggle('on', (b.dataset.fog === '1') === choice.fog));
   };
   // Let the title paint before the (slower) first map paint.
   requestAnimationFrame(() => setTimeout(draw, 0));
@@ -1271,11 +1307,13 @@ function showStart() {
     if (h) { choice.faction = +h.dataset.house; sfx.select(); draw(); return; }
     const d = e.target.closest('[data-diff]');
     if (d) { choice.difficulty = d.dataset.diff; draw(); return; }
+    const fg = e.target.closest('[data-fog]');
+    if (fg) { choice.fog = fg.dataset.fog === '1'; prefs.fog = choice.fog; savePrefs(); root.querySelectorAll('[data-fog]').forEach((x) => x.classList.toggle('on', x === fg)); return; }
     const b = e.target.closest('[data-s]');
     if (!b) return;
     if (b.dataset.s === 'reroll') { choice.seed = Math.random().toString(36).slice(2, 8); draw(); }
     if (b.dataset.s === 'go') {
-      const s = newGame({ seed: choice.seed, playerFaction: choice.faction, difficulty: choice.difficulty });
+      const s = newGame({ seed: choice.seed, playerFaction: choice.faction, difficulty: choice.difficulty, fog: choice.fog });
       beginTurn(s, currentFaction(s));
       sfx.turn();
       mountGame(s);
