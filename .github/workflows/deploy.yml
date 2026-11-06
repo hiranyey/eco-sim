@@ -1,0 +1,75 @@
+# Builds the app, pushes it with two tags (:latest and :<git sha>) and asks
+# Vibeship to deploy that exact digest. Copy it to .github/workflows/deploy.yml
+# in the app's repository.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   REPOFLOW_USERNAME, REPOFLOW_PASSWORD  a registry login that can push IMAGE
+#   WEBHOOK_URL  the URL rotate_webhook returned once. It is a secret:
+#                anyone holding it can deploy the project, so never echo it.
+#
+# The webhook only queues the deploy. Vibeship pulls IMAGE@<digest>, health
+# checks it and only then routes traffic to it; if it fails, the previous
+# version keeps serving. Check the outcome with list_deploys or get_deploy_logs.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push waits for the one in flight.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: api.repoflow.io/hiranyeyg-6713/vibes/eco-sim
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: api.repoflow.io
+          username: ${{ secrets.REPOFLOW_USERNAME }}
+          password: ${{ secrets.REPOFLOW_PASSWORD }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # The server's architecture.
+          platforms: linux/amd64
+          # A plain image manifest, without attestations, so the digest is the image's.
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$WEBHOOK_URL" ]]; then echo "::error::Add the WEBHOOK_URL repository secret"; exit 1; fi
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then echo "::error::Unexpected image digest: $DIGEST"; exit 1; fi
+          body=$(jq -nc --arg digest "$DIGEST" --arg image "$IMAGE" '{digest: $digest, image: $image}')
+          # The URL is passed from the environment and never printed.
+          curl -fsS --retry 3 -X POST -H 'Content-Type: application/json' -d "$body" "$WEBHOOK_URL"
+          echo
+          echo "Queued a deploy of $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
