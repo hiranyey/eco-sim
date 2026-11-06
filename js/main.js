@@ -107,6 +107,9 @@ function mountGame(s) {
     </div>`;
   ui.board = createBoard(root.querySelector('.board'), { onTileClick, onTileHover, onCancel: deselect, onView: onZoom });
   ui.board.build(s);
+  // Phones: start zoomed in on the capital so units are big enough to tap.
+  const cap = s.cities.find((c) => c.owner === s.playerId && c.capital);
+  if (cap && window.innerWidth < 700) ui.board.zoomTo(1.8, cap.tile);
   root.querySelector('.game').addEventListener('click', onClick);
   render();
   if (!prefs.seenTutorial) showHelp(true);
@@ -275,6 +278,12 @@ function paneSelect() {
     const ruler = s.characters[f.rulerId];
     return `<div class="card intro" style="--c:${f.color}">
       <div class="row">${crest(f.key, f.color, 'crest md')}<b class="intro-name">${esc(f.name)}</b></div><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
+      <div class="realm">${[
+        ['castle', citiesOf(s, s.playerId).length, 'Towns'],
+        ['attack', s.units.filter((u) => u.owner === s.playerId && u.type !== 'ruler').length, 'Soldiers'],
+        ['gold', `+${income(s, s.playerId).gold}`, 'Gold / turn'],
+        ['renown', `+${renownIncome(s, s.playerId)}`, 'Renown / turn'],
+      ].map(([ic, v, l]) => `<div>${icon(ic)}<b>${v}</b><small>${l}</small></div>`).join('')}</div>
       <div class="row ruled">${portrait(ruler, f.color, { cls: 'portrait sm' })}<p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.<br><span class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</span></p></div></div>
       ${goals()}
       <div class="howto-mini">
@@ -297,6 +306,22 @@ function paneSelect() {
   return out + goals();
 }
 
+// Tiny price chart: the line is the market price by round, the dashed line the base price.
+function sparkline(vals, base) {
+  const W = 92;
+  const H = 26;
+  const v = vals.slice(-20);
+  if (v.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"><path d="M0,${H / 2}H${W}" class="base"/></svg>`;
+  const lo = Math.min(base * 0.6, ...v);
+  const hi = Math.max(base * 1.4, ...v);
+  const y = (x) => (H - 3 - ((x - lo) / (hi - lo)) * (H - 6)).toFixed(1);
+  const pts = v.map((x, i) => `${((i / (v.length - 1)) * W).toFixed(1)},${y(x)}`);
+  const last = v[v.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="M0,${y(base)}H${W}" class="base"/>
+    <path d="M0,${H}L${pts.join('L')}L${W},${H}Z" class="area"/><path d="M${pts.join('L')}" class="line ${last > base * 1.1 ? 'hi' : last < base * 0.9 ? 'lo' : ''}"/>
+    <circle cx="${W}" cy="${y(last)}" r="2.4" class="dot"/></svg>`;
+}
+
 function paneMarket() {
   const s = ui.s;
   const f = me();
@@ -309,7 +334,8 @@ function paneMarket() {
     const s1 = quote(s, s.playerId, g, 1, 'sell').total;
     const s5 = quote(s, s.playerId, g, 5, 'sell').total;
     return `<div class="good">
-      <div class="row"><b>${icon(g)} ${G.name}</b><span>${p.toFixed(1)} ${trend}</span><span class="muted">you have ${f[g]}</span></div>
+      <div class="row"><b>${icon(g)} ${G.name}</b>${sparkline([...(s.priceHistory?.[g] ?? []), p], G.base)}<span class="price">${p.toFixed(1)} ${trend}</span></div>
+      <div class="muted small">You have <b class="have">${f[g]}</b> · base price ${G.base}</div>
       <div class="trade">
         <button data-act="trade" data-g="${g}" data-n="1" data-side="buy" ${can && f.gold >= b1 ? '' : 'disabled'}>Buy 1 <small>−${b1}${icon('gold')}</small></button>
         <button data-act="trade" data-g="${g}" data-n="5" data-side="buy" ${can && f.gold >= b5 ? '' : 'disabled'}>Buy 5 <small>−${b5}${icon('gold')}</small></button>
@@ -407,7 +433,17 @@ function paneResearch() {
 }
 
 function paneLog() {
-  return `<div class="log">${[...ui.s.log].reverse().slice(0, 80).map((l) => `<div class="entry ${l.kind}"><time>T${l.turn}</time><span>${iconize(esc(l.text))}</span></div>`).join('')}</div>`;
+  const items = [...ui.s.log].reverse().slice(0, 90);
+  let out = '<div class="log">';
+  let turn = null;
+  for (const l of items) {
+    if (l.turn !== turn) {
+      turn = l.turn;
+      out += `<div class="log-turn"><span>Turn ${l.turn}</span></div>`;
+    }
+    out += `<div class="entry ${l.kind}"><span>${iconize(esc(l.text))}</span></div>`;
+  }
+  return `${out}</div>`;
 }
 
 // ---------------------------------------------------------------- input
@@ -847,7 +883,9 @@ function showHelp(first) {
       <div><b>${icon('danger')}Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
       <div><b>${icon('crown')}Your ruler</b><p>Your ruler fights on the map and inspires adjacent troops (+25% attack). If they fall, your heir inherits, and some of your towns may revolt.</p></div>
     </div>
-    <p class="muted small">Keys: <kbd>N</kbd> next unit · <kbd>F</kbd> hold · <kbd>U</kbd> undo move · <kbd>D</kbd> danger zones · <kbd>E</kbd> end turn · <kbd>Esc</kbd> deselect</p>
+    <h4>The troops</h4>
+    <div class="roster">${[...RECRUITABLE, 'ruler'].map((t) => { const U = UNITS[t]; return `<div class="ro">${tokenSvg(t, me().color)}<div><b>${U.name}</b><span class="ro-stats">${icon('attack')}${U.atk} ${icon('defence')}${U.def} ${icon('move')}${U.move} ${icon('range')}${U.range} ${icon('hp')}${U.hp}</span><small>${esc(U.desc)}</small></div></div>`; }).join('')}</div>
+    <p class="muted small">Keys: <kbd>N</kbd> next unit · <kbd>F</kbd> hold · <kbd>U</kbd> undo move · <kbd>D</kbd> danger zones · <kbd>E</kbd> end turn · <kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd> zoom · <kbd>Esc</kbd> deselect</p>
     <div class="actions"><button class="primary" data-close>${first ? 'To war!' : 'Got it'}</button></div>`);
   if (first) { prefs.seenTutorial = true; savePrefs(); }
 }
@@ -986,7 +1024,8 @@ function showStart() {
     root.querySelectorAll('.house').forEach((b) => b.classList.toggle('on', +b.dataset.house === choice.faction));
     root.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === choice.difficulty));
   };
-  draw();
+  // Let the title paint before the (slower) first map paint.
+  requestAnimationFrame(() => setTimeout(draw, 0));
   root.querySelector('.start').addEventListener('click', (e) => {
     const h = e.target.closest('[data-house]');
     if (h) { choice.faction = +h.dataset.house; sfx.select(); draw(); return; }

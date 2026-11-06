@@ -42,6 +42,8 @@ HTTP, not opened from disk.
   - Thorne has strong archers and forest defence.
   - Ashkar has fast cavalry.
 
+**Map:** zoom with the mouse wheel, pinch or the `+`/`−` buttons, and drag to pan. Phones start zoomed in on your capital.
+
 **Quality of life:** Undo move (`U`), Danger zones that show every hex enemies can strike next turn (`D`), Next unit (`N`), a "While you waited" report after each enemy turn, an early-goals checklist, autosave, three difficulty levels, three enemy-turn speeds, and synthesized sound effects.
 
 ## Code
@@ -58,6 +60,8 @@ js/board.js                 SVG board rendering and animation
 js/art/painter.js           procedural terrain painter: blended biomes, hill shading, coasts, forests, farmland, roads
 js/art/sprites.js           faction crests, unit emblems, towns, shrines (SVG)
 js/art/icons.js             interface icon set
+js/art/portrait.js          procedural ruler and heir portraits
+js/art/vignettes.js         woodcut illustrations for court events
 js/main.js                  UI controller: input, panels, modals, turn flow, saving
 js/audio.js                 Web Audio sound effects
 tests/hexmarch.test.mjs     determinism, combat preview == result, full AI games, invariants

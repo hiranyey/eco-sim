@@ -702,6 +702,12 @@ function heal(s, fid) {
 function newRound(s) {
   s.turn++;
   for (const g of Object.keys(GOODS)) s.market[g] += (GOODS[g].base - s.market[g]) * 0.15;
+  s.priceHistory ??= {};
+  for (const g of Object.keys(GOODS)) {
+    const h = (s.priceHistory[g] ??= []);
+    h.push(Math.round(s.market[g] * 100) / 100);
+    if (h.length > 30) h.shift();
+  }
   for (const f of s.factions) {
     if (!f.alive) continue;
     const r = s.characters[f.rulerId];

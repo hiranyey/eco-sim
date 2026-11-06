@@ -93,11 +93,21 @@ export function createBoard(svg, handlers) {
 
   function zoomLevel() { return full[2] / view[2]; }
 
+  // When zoomed in, the view takes the shape of the screen area so no space is wasted.
+  function heightFor(w) {
+    const r = svg.getBoundingClientRect();
+    const aspect = r.width > 0 && r.height > 0 ? r.width / r.height : full[2] / full[3];
+    return Math.min(full[3], w / aspect);
+  }
+
   function applyView() {
     // Keep the view inside the map (with a little slack) and no wider than the whole map.
     const z = zoomLevel();
     if (z <= 1.001) view = [...full];
     else {
+      const cy = view[1] + view[3] / 2;
+      view[3] = heightFor(view[2]);
+      view[1] = cy - view[3] / 2;
       view[0] = Math.min(Math.max(view[0], -view[2] * 0.08), full[2] - view[2] * 0.92);
       view[1] = Math.min(Math.max(view[1], -view[3] * 0.08), full[3] - view[3] * 0.92);
     }
@@ -122,7 +132,7 @@ export function createBoard(svg, handlers) {
     if (Math.abs(nz - z) < 1e-4) return;
     const [mx, my] = clientX == null ? [view[0] + view[2] / 2, view[1] + view[3] / 2] : toMap(clientX, clientY);
     const nw = full[2] / nz;
-    const nh = full[3] / nz;
+    const nh = nz <= 1.001 ? full[3] : heightFor(nw);
     view = [mx - ((mx - view[0]) / view[2]) * nw, my - ((my - view[1]) / view[3]) * nh, nw, nh];
     applyView();
   }
@@ -524,5 +534,13 @@ export function createBoard(svg, handlers) {
     build, render, animateMove, animateAttack, float, pulse, showPath, setHover, shockwave, sparkle,
     zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: () => { view = [...full]; applyView(); },
     centerOn, zoomLevel, tileCenter: (t) => center(s.W, t),
+    zoomTo: (z, tile) => {
+      const nz = Math.min(MAX_ZOOM, Math.max(1, z));
+      const [x, y] = center(s.W, tile);
+      const nw = full[2] / nz;
+      const nh = heightFor(nw);
+      view = [x - nw / 2, y - nh / 2, nw, nh];
+      applyView();
+    },
   };
 }
