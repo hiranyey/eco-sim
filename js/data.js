@@ -69,7 +69,7 @@ export const FACTIONS = [
 export const REBEL_COLOR = '#6d6a75';
 
 export const DIFFICULTY = {
-  easy: { name: 'Squire', aiGold: 0.75, aiStart: 0 },
+  easy: { name: 'Squire', aiGold: 0.7, aiStart: 0 },
   normal: { name: 'Lord', aiGold: 1, aiStart: 0 },
   hard: { name: 'Warlord', aiGold: 1.35, aiStart: 1 },
 };

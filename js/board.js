@@ -1,6 +1,6 @@
 // SVG game board: static terrain plus dynamic layers for territory, towns, units, highlights and effects.
 import { center, corners, mapSize, neighborDir, HEX } from './hex.js';
-import { TERRAIN, UNITS, REBEL_COLOR } from './data.js';
+import { TERRAIN, REBEL_COLOR } from './data.js';
 import { maxHp } from './world.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -119,7 +119,6 @@ export function createBoard(svg, handlers) {
     // Territory tint and borders
     layers.tint.innerHTML = '';
     layers.borders.innerHTML = '';
-    let d = '';
     const ownerOf = (i) => (s.tiles[i].city >= 0 ? s.cities[s.tiles[i].city].owner : null);
     for (let i = 0; i < s.tiles.length; i++) {
       const o = ownerOf(i);
@@ -134,7 +133,6 @@ export function createBoard(svg, handlers) {
         el('path', { d: `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`, stroke: colorOf(o), class: 'border' }, layers.borders);
       }
     }
-    void d;
     // Towns and shrines
     layers.sites.innerHTML = '';
     s.tiles.forEach((t, i) => {

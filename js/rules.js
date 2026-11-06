@@ -351,13 +351,25 @@ export function recruit(s, fid, cityId, type) {
   if (c.owner !== fid) return 'Not your town';
   if (!UNITS[type] || type === 'ruler') return 'Unknown unit';
   if (c.recruits >= recruitLimit(c)) return 'This town has already recruited this turn';
-  if (unitAt(s, c.tile)) return 'Move the unit out of the town first';
+  const spot = recruitSpot(s, c);
+  if (spot == null) return 'No free hex in or next to the town';
   const cost = unitCost(s, fid, type, c);
   if (!canAfford(f, cost)) return 'Not enough resources';
   pay(f, cost);
   c.recruits++;
-  const u = addUnit(s, type, fid, c.tile);
-  return { type: 'recruit', uid: u.id };
+  const u = addUnit(s, type, fid, spot);
+  return { type: 'recruit', uid: u.id, tile: spot };
+}
+
+// New recruits muster in the town, or on a free hex beside it if the town is occupied.
+export function recruitSpot(s, c) {
+  if (!unitAt(s, c.tile)) return c.tile;
+  for (const n of neighbors(W, H, c.tile)) {
+    if (!TERRAIN[s.tiles[n].t].pass || unitAt(s, n)) continue;
+    const o = territoryOwner(s, n);
+    if (o == null || o === c.owner) return n;
+  }
+  return null;
 }
 
 export function upgradeCity(s, fid, cityId) {
@@ -412,6 +424,7 @@ export function income(s, fid) {
   for (const c of citiesOf(s, fid)) {
     const L = CITY_LEVELS[c.level];
     out.gold += L.gold + (c.capital ? 2 : 0) + (c.capital && f.key === 'selene' ? 2 : 0);
+    if (c.capital) out.grain += 2;
     if (c.buildings.includes('market')) out.gold += f.key === 'selene' ? 5 : 3;
     if (c.buildings.includes('granary')) out.grain += 3;
     if (c.buildings.includes('workshop')) { out.timber += 1; out.iron += 1; }

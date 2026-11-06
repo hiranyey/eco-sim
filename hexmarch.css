@@ -289,3 +289,19 @@ svg.board { width: 100%; height: 100%; max-height: 100%; display: block; user-se
   .houses, .help, .blds, .recruits { grid-template-columns: 1fr; }
   .board-actions .end { min-width: 120px; padding: 9px 14px; }
 }
+
+.report { position: absolute; left: 12px; top: 48px; z-index: 4; max-width: min(380px, 80%); background: rgb(17 21 28 / 0.95); border: 1px solid #4b4330; border-radius: 12px; padding: 10px 12px; box-shadow: 0 12px 30px rgb(0 0 0 / 0.45); display: none; }
+.report.on { display: block; animation: pop 0.25s ease-out; }
+.report-h { font-family: var(--display); color: var(--gold2); font-weight: 700; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+.report .x { position: static; padding: 0 4px; }
+.report .entry { font-size: 12.5px; padding: 3px 0; border-top: 1px solid rgb(255 255 255 / 0.05); }
+.report .good { color: #b9ecc8; }
+.report .bad { color: #f6b8ae; }
+.report .war { color: #f3cd8c; }
+.report .world { color: #bccbee; }
+
+.goals { border-left-color: var(--gold); }
+.goal { display: flex; gap: 8px; font-size: 13px; padding: 2px 0; color: #d6d7dc; }
+.goal span { width: 14px; color: var(--muted); }
+.goal.done { color: var(--muted); text-decoration: line-through; }
+.goal.done span { color: var(--pos); text-decoration: none; }

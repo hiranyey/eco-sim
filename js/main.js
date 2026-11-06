@@ -1,13 +1,13 @@
 // Hexmarch UI controller: start screen, input, panels, turn flow and animation.
 import { newGame } from './world.js';
 import {
-  W as _W, UNITS, RECRUITABLE, BUILDINGS, GOODS, TERRAIN, TRAITS, FACTIONS, DIFFICULTY, RENOWN_TO_WIN, TURN_LIMIT, CITY_LEVELS,
+  UNITS, RECRUITABLE, BUILDINGS, GOODS, TERRAIN, TRAITS, FACTIONS, DIFFICULTY, RENOWN_TO_WIN, TURN_LIMIT, CITY_LEVELS,
 } from './data.js';
 import {
-  unitAt, cityAt, citiesOf, unitsOf, reachable, pathTo, attackTargets, combatPreview, moveUnit, attack, recruit,
+  unitAt, cityAt, citiesOf, reachable, pathTo, attackTargets, combatPreview, moveUnit, attack, recruit,
   upgradeCity, build, trade, quote, income, unitCost, upgradeCost, buildingCost, canAfford, relation, declareWar,
   offerPeace, peaceTerms, strength, endTurn, beginTurn, currentFaction, canAttack, readyUnits, hostile, defenseBonus,
-  recruitLimit, renownIncome, movePoints, threatTiles,
+  recruitLimit, renownIncome, movePoints, threatTiles, recruitSpot,
 } from './rules.js';
 import { aiTurn } from './ai.js';
 import { eventView, resolveEvent } from './events.js';
@@ -21,7 +21,6 @@ const root = document.getElementById('app');
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const noHover = window.matchMedia?.('(hover: none)').matches;
-void _W;
 
 let prefs = { speed: 'normal', seenTutorial: false };
 try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; } catch { /* ignore */ }
@@ -191,7 +190,7 @@ function cityCard(c) {
   for (const t of tiles) { const y = TERRAIN[s.tiles[t].t].yields; yields[y] = (yields[y] ?? 0) + L.tileYield; }
   let out = `<div class="card city-card" style="--c:${owner.color}">
     <div class="row"><div class="castle">🏰</div><div><b>${esc(c.name)}</b>${c.capital ? ' <span class="tag">Capital</span>' : ''}<div class="muted">${esc(owner.name)} · Level ${c.level}</div></div></div>
-    <div class="yields">💰${L.gold + (c.capital ? 2 : 0)} ${Object.entries(yields).map(([k, v]) => `${GOODS[k].icon}${v}`).join(' ')}<span class="muted small">per turn</span></div>`;
+    <div class="yields">💰${L.gold + (c.capital ? 2 : 0)} ${c.capital ? '🌾+2 ' : ''}${Object.entries(yields).map(([k, v]) => `${GOODS[k].icon}${v}`).join(' ')}<span class="muted small">per turn</span></div>`;
   if (!mine) {
     out += `<p class="muted small">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : 'You are at peace with its owner.'}</p></div>`;
     return out;
@@ -217,9 +216,9 @@ function cityCard(c) {
   out += '</div>';
   // Recruit
   const left = recruitLimit(c) - c.recruits;
-  const blocked = unitAt(s, c.tile);
+  const blocked = recruitSpot(s, c) == null;
   out += `<h4>Recruit <span class="muted">${left > 0 ? `${left} left this turn` : 'done this turn'}</span></h4>
-    ${blocked ? '<p class="muted small">Move the unit out of the town to recruit here.</p>' : ''}<div class="recruits">`;
+    ${blocked ? '<p class="muted small">No free hex in or beside the town to muster troops.</p>' : unitAt(s, c.tile) ? '<p class="muted small">The town is occupied, so recruits will muster beside it.</p>' : ''}<div class="recruits">`;
   for (const t of RECRUITABLE) {
     const cost = unitCost(s, s.playerId, t, c);
     const ok = can && left > 0 && !blocked && canAfford(f, cost);
@@ -231,6 +230,22 @@ function cityCard(c) {
   return out;
 }
 
+function goals() {
+  const s = ui.s;
+  const f = me();
+  const t = s.tut ?? {};
+  const list = [
+    ['Move a unit (click it, then a lit hex)', t.moved],
+    ['Win a fight (hover a red ring first)', f.stats.kills > 0],
+    ['Claim a town (walk into an empty one)', f.stats.captures > 0],
+    ['Recruit a unit (click your town)', t.recruited],
+    ['Stand on a shrine ✦ for renown', (f.stats.renown.shrines ?? 0) > 0],
+    ['Grow a town or add a building', f.stats.built > 0],
+  ];
+  if (list.every(([, d]) => d) || s.turn > 15) return '';
+  return `<div class="card goals"><b>Early goals</b>${list.map(([txt, d]) => `<div class="goal ${d ? 'done' : ''}"><span>${d ? '✔' : '○'}</span>${txt}</div>`).join('')}</div>`;
+}
+
 function paneSelect() {
   const s = ui.s;
   if (ui.selectedTile == null) {
@@ -239,6 +254,7 @@ function paneSelect() {
     return `<div class="card intro" style="--c:${f.color}">
       <b>${esc(f.name)}</b><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
       <p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.</p></div>
+      ${goals()}
       <div class="howto-mini">
         <p><b>Click a unit</b> to see where it can go. <b>Red rings</b> are enemies in range: hover one to preview the fight.</p>
         <p><b>Click a town</b> to recruit, grow it, or add buildings.</p>
@@ -256,7 +272,7 @@ function paneSelect() {
     out += `<div class="card"><b>${T.name}</b><p class="muted small">${T.pass ? `Movement: ${T.move > 1 ? 'ends your move when entered' : 'normal'}. Defence ×${T.def}.` : 'Impassable.'} ${t.city >= 0 ? `Worked by ${esc(s.cities[t.city].name)}: yields ${GOODS[T.yields].icon}.` : ''}</p>
       ${t.shrine ? '<p><span class="gold">✦ Ancient shrine.</span> A unit standing here at the start of your turn earns +1 renown.</p>' : ''}</div>`;
   } else if (t.shrine) out += '<p class="small"><span class="gold">✦</span> Shrine: +1 renown per turn for whoever stands here.</p>';
-  return out;
+  return out + goals();
 }
 
 function paneMarket() {
@@ -440,6 +456,7 @@ async function doMove(u, tile) {
   const res = moveUnit(s, u.id, tile);
   if (typeof res === 'string') return toast(res);
   ui.undo = res.capture ? null : { snapshot, uid: u.id };
+  s.tut = { ...(s.tut ?? {}), moved: true };
   ui.busy = true;
   ui.reach = null;
   ui.targets = [];
@@ -512,7 +529,7 @@ async function onClick(e) {
       nextUnit();
       break;
     }
-    case 'recruit': r(recruit(s, fid, +b.dataset.v, b.dataset.u), () => { sfx.build(); }); break;
+    case 'recruit': r(recruit(s, fid, +b.dataset.v, b.dataset.u), () => { sfx.build(); s.tut = { ...(s.tut ?? {}), recruited: true }; }); break;
     case 'upgrade': r(upgradeCity(s, fid, +b.dataset.v), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
     case 'build': r(build(s, fid, +b.dataset.v, b.dataset.b), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
     case 'trade': r(trade(s, fid, b.dataset.g, +b.dataset.n, b.dataset.side), () => sfx.coin()); break;
@@ -580,6 +597,8 @@ async function playerEndTurn() {
   ui.busy = true;
   ui.undo = null;
   deselect();
+  const logStart = s.log.length;
+  const turnStart = s.turn;
   endTurn(s);
   while (!s.winner && currentFaction(s) !== s.playerId) {
     const fid = currentFaction(s);
@@ -599,6 +618,7 @@ async function playerEndTurn() {
   if (s.winner) return showEnd();
   sfx.turn();
   banner(`Turn ${s.turn} · Your move`, me().color);
+  report(s.log.slice(Math.max(0, logStart - (s.log.length > 190 ? 10 : 0))).filter((l) => l.turn >= turnStart));
   afterPlayerTurnStarts();
 }
 
@@ -736,6 +756,25 @@ function showEnd() {
   root.querySelector('[data-again]').addEventListener('click', () => showStart());
 }
 
+// Summarise what happened during the enemies' turns.
+function report(entries) {
+  const s = ui.s;
+  const me_ = me();
+  const mine = entries.filter((l) => l.kind === 'bad' || l.kind === 'good' || l.text.includes(me_.short) || l.text.includes(me_.name));
+  const big = entries.filter((l) => !mine.includes(l) && /declares war|destroyed|falls in battle|cathedral|make peace/.test(l.text));
+  const items = [...mine, ...big].slice(-5);
+  if (!items.length) return;
+  if (items.some((l) => l.kind === 'bad')) sfx.bad();
+  const box = root.querySelector('.report') ?? Object.assign(document.createElement('div'), { className: 'report' });
+  root.querySelector('.board-wrap').appendChild(box);
+  box.innerHTML = `<div class="report-h">While you waited <button class="x" data-dismiss>✕</button></div>${items.map((l) => `<div class="entry ${l.kind}">${esc(l.text)}</div>`).join('')}`;
+  box.classList.add('on');
+  box.querySelector('[data-dismiss]').onclick = () => box.classList.remove('on');
+  clearTimeout(box._t);
+  box._t = setTimeout(() => box.classList.remove('on'), 9000);
+  void s;
+}
+
 function toast(text) {
   const t = document.createElement('div');
   t.className = 'toast';
@@ -813,4 +852,4 @@ function showStart() {
 
 showStart();
 window.__hex = ui;
-window.__hexDebug = { showEnd, render };
+window.__hexDebug = { showEnd, render, aiTurn };

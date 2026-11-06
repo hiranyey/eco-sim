@@ -196,7 +196,7 @@ function* recruitUnits(s, fid) {
       const inc = income(s, fid);
       if (army >= target) return;
       if (inc.grain - inc.upkeep < -1 && f.grain < 4) return;
-      if (unitAt(s, c.tile) || c.recruits >= recruitLimit(c)) break;
+      if (c.recruits >= recruitLimit(c)) break;
       const type = pickUnit(s, fid, c);
       if (!type) return;
       const r = recruit(s, fid, c.id, type);
@@ -239,7 +239,8 @@ function diplomacy(s, fid) {
   const aggression = s.difficulty === 'hard' ? 0.45 : s.difficulty === 'easy' ? 0.2 : 0.32;
   for (const o of s.factions) {
     if (!o.alive || o.id === fid || relation(s, fid, o.id).war || relation(s, fid, o.id).truce > s.turn) continue;
-    if (!near(s, fid, o.id) || (o.id === s.playerId && s.turn < 10)) continue;
+    const grace = s.difficulty === 'easy' ? 16 : s.difficulty === 'hard' ? 8 : 10;
+    if (!near(s, fid, o.id) || (o.id === s.playerId && s.turn < grace)) continue;
     const ratio = mine / Math.max(1, strength(s, o.id));
     const isLeader = o.id === leader.id && o.renown >= RENOWN_TO_WIN * 0.55;
     if ((ratio > 1.3 || (isLeader && ratio > 0.85)) && rand(s) < aggression + (isLeader ? 0.25 : 0)) {

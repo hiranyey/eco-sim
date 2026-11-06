@@ -140,7 +140,7 @@ export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'no
     const heir = rand(s) < 0.75 ? newCharacter(s, randInt(s, 2, 14)) : null;
     s.factions.push({
       id: i, key: F.key, name: F.name, short: F.short, color: F.color, alive: true, ai: i !== playerFaction,
-      gold: 10, grain: 4, timber: 4, iron: 2, renown: 0, rulerId: ruler, heirId: heir,
+      gold: 10, grain: 10, timber: 4, iron: 2, renown: 0, rulerId: ruler, heirId: heir,
       stats: { kills: 0, captures: 0, lost: 0, built: 0, renown: {} }, eliminatedTurn: null,
     });
     s.cities.push({ id: i, name: placeName(s, usedNames), tile: capitals[i], owner: i, level: 1, buildings: [], capital: true, recruits: 0 });
