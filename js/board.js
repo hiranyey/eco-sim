@@ -16,6 +16,10 @@ export function createBoard(svg, handlers) {
   let s = null;
   const units = new Map();
   let layers = {};
+  let hoverPoly = null;
+  // Camera: the visible part of the map as an SVG viewBox.
+  let full = [0, 0, 1, 1];
+  let view = [0, 0, 1, 1];
 
   function el(tag, attrs = {}, parent = null) {
     const e = document.createElementNS(NS, tag);
@@ -28,7 +32,9 @@ export function createBoard(svg, handlers) {
     s = state;
     units.clear();
     const [w, h] = mapSize(s.W, s.H);
-    svg.setAttribute('viewBox', `0 0 ${w.toFixed(0)} ${h.toFixed(0)}`);
+    full = [0, 0, Math.round(w), Math.round(h)];
+    view = [...full];
+    applyView();
     const owners = [...s.factions.map((f) => [f.id, f.color]), [-1, REBEL_COLOR]];
     svg.innerHTML = `<defs>
       <radialGradient id="shrineGlow"><stop offset="0" stop-color="#fff3b0" stop-opacity="0.9"/><stop offset="0.5" stop-color="#ffd35a" stop-opacity="0.35"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
@@ -38,12 +44,29 @@ export function createBoard(svg, handlers) {
       <linearGradient id="rim-gold" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#fff4c2"/><stop offset="0.45" stop-color="#e0aa3e"/><stop offset="1" stop-color="#6d4710"/></linearGradient>
       <linearGradient id="rim-sel" x1="0" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#ffe9a8"/></linearGradient>
       <radialGradient id="gloss" cx="0.35" cy="0.2" r="0.75"><stop offset="0" stop-color="#fff" stop-opacity="0.45"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.06"/><stop offset="1" stop-color="#000" stop-opacity="0.25"/></radialGradient>
+      <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="rgb(200 40 25 / 0.14)"/><rect width="2.6" height="7" fill="rgb(230 60 40 / 0.42)"/></pattern>
+      <pattern id="glint" width="60" height="44" patternUnits="userSpaceOnUse"><path d="M6,10q4,-2.6 8,0M30,30q5,-3 10,0M44,8q3,-2 6,0M14,36q3,-2 6,0" fill="none" stroke="rgb(235 248 255 / 0.55)" stroke-width="0.9" stroke-linecap="round"/></pattern>
+      <radialGradient id="cloud"><stop offset="0" stop-color="#0a1420" stop-opacity="0.24"/><stop offset="0.6" stop-color="#0a1420" stop-opacity="0.1"/><stop offset="1" stop-color="#0a1420" stop-opacity="0"/></radialGradient>
+      <radialGradient id="spark"><stop offset="0" stop-color="#fff8d8"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
       ${owners.map(([id, c]) => `<radialGradient id="tok${id}" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="${shade(c, 0.28)}"/><stop offset="0.65" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -0.45)}"/></radialGradient>`).join('')}
+      <clipPath id="waterClip">${s.tiles.map((t, i) => (t.t === 'water' ? `<polygon points="${pts(corners(...center(s.W, i), HEX + 1))}"/>` : '')).join('')}</clipPath>
+      <clipPath id="mapClip"><rect x="3" y="3" width="${(w - 6).toFixed(0)}" height="${(h - 6).toFixed(0)}" rx="3"/></clipPath>
     </defs>`;
     layers = {};
-    for (const name of ['terrain', 'grid', 'tint', 'borders', 'hl', 'sites', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
+    for (const name of ['terrain', 'water', 'grid', 'tint', 'borders', 'clouds', 'hl', 'hover', 'sites', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
     const art = paintTerrain(s);
     el('image', { href: art.url, x: 0, y: 0, width: art.width, height: art.height, preserveAspectRatio: 'none' }, layers.terrain);
+    // Atmosphere: glints drifting over open water, cloud shadows drifting over everything.
+    layers.water.setAttribute('clip-path', 'url(#waterClip)');
+    el('rect', { x: -120, y: -60, width: art.width + 240, height: art.height + 120, fill: 'url(#glint)', class: 'glints' }, layers.water);
+    el('rect', { x: -120, y: -60, width: art.width + 240, height: art.height + 120, fill: 'url(#glint)', class: 'glints two' }, layers.water);
+    layers.clouds.setAttribute('clip-path', 'url(#mapClip)');
+    for (let k = 0; k < 5; k++) {
+      const cy = (art.height * (k + 0.5)) / 5 + ((k * 37) % 40) - 20;
+      const rx = 90 + ((k * 53) % 70);
+      el('ellipse', { cx: -rx, cy, rx, ry: rx * 0.55, fill: 'url(#cloud)', class: 'cloud', style: `--dur:${110 + k * 23}s;--delay:${-k * 31}s;--dist:${art.width + rx * 2}px` }, layers.clouds);
+    }
+    hoverPoly = el('polygon', { points: '', class: 'hover-hex' }, layers.hover);
     for (let i = 0; i < s.tiles.length; i++) {
       const [cx, cy] = center(s.W, i);
       el('polygon', { points: pts(corners(cx, cy, HEX)), class: `tile t-${s.tiles[i].t}`, 'data-tile': i }, layers.grid);
@@ -51,12 +74,126 @@ export function createBoard(svg, handlers) {
     el('rect', { x: 1.5, y: 1.5, width: art.width - 3, height: art.height - 3, rx: 3, class: 'frame-outer' }, layers.grid);
     el('rect', { x: 5, y: 5, width: art.width - 10, height: art.height - 10, rx: 2, class: 'frame-inner' }, layers.grid);
     svg.onclick = (e) => {
+      if (suppressClick) { suppressClick = false; return; }
       const t = tileFromEvent(e);
       if (t != null) handlers.onTileClick(t, e);
     };
     svg.oncontextmenu = (e) => { e.preventDefault(); handlers.onCancel?.(); };
-    svg.onmousemove = (e) => handlers.onTileHover(tileFromEvent(e), e);
+    svg.onmousemove = (e) => { if (!dragging) handlers.onTileHover(tileFromEvent(e), e); };
     svg.onmouseleave = () => handlers.onTileHover(null, null);
+    if (handlers.interactive !== false) bindCamera();
+  }
+
+  // ---------- camera ----------
+  const MAX_ZOOM = 2.6;
+  let suppressClick = false;
+  let dragging = false;
+  const pointers = new Map();
+  let pinch = null;
+
+  function zoomLevel() { return full[2] / view[2]; }
+
+  function applyView() {
+    // Keep the view inside the map (with a little slack) and no wider than the whole map.
+    const z = zoomLevel();
+    if (z <= 1.001) view = [...full];
+    else {
+      view[0] = Math.min(Math.max(view[0], -view[2] * 0.08), full[2] - view[2] * 0.92);
+      view[1] = Math.min(Math.max(view[1], -view[3] * 0.08), full[3] - view[3] * 0.92);
+    }
+    svg.setAttribute('viewBox', view.map((v) => v.toFixed(1)).join(' '));
+    svg.classList.toggle('zoomed', zoomLevel() > 1.01);
+    handlers.onView?.(zoomLevel());
+  }
+
+  function toMap(clientX, clientY) {
+    const m = svg.getScreenCTM();
+    if (!m) return [view[0] + view[2] / 2, view[1] + view[3] / 2];
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const p = pt.matrixTransform(m.inverse());
+    return [p.x, p.y];
+  }
+
+  function zoomAt(clientX, clientY, factor) {
+    const z = zoomLevel();
+    const nz = Math.min(MAX_ZOOM, Math.max(1, z * factor));
+    if (Math.abs(nz - z) < 1e-4) return;
+    const [mx, my] = clientX == null ? [view[0] + view[2] / 2, view[1] + view[3] / 2] : toMap(clientX, clientY);
+    const nw = full[2] / nz;
+    const nh = full[3] / nz;
+    view = [mx - ((mx - view[0]) / view[2]) * nw, my - ((my - view[1]) / view[3]) * nh, nw, nh];
+    applyView();
+  }
+
+  function panBy(dxClient, dyClient) {
+    const m = svg.getScreenCTM();
+    if (!m) return;
+    view[0] -= dxClient / m.a;
+    view[1] -= dyClient / m.d;
+    applyView();
+  }
+
+  function centerOn(tile) {
+    if (zoomLevel() <= 1.01) return;
+    const [x, y] = center(s.W, tile);
+    const margin = 0.18;
+    const inside = x > view[0] + view[2] * margin && x < view[0] + view[2] * (1 - margin) && y > view[1] + view[3] * margin && y < view[1] + view[3] * (1 - margin);
+    if (inside) return;
+    view[0] = x - view[2] / 2;
+    view[1] = y - view[3] / 2;
+    applyView();
+  }
+
+  function bindCamera() {
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)));
+    }, { passive: false });
+    svg.addEventListener('pointerdown', (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: zoomLevel() };
+      }
+    });
+    svg.addEventListener('pointermove', (e) => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (pointers.size === 2 && pinch) {
+        const [a, b] = [...pointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        const target = pinch.z * (d / Math.max(1, pinch.d));
+        zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, target / zoomLevel());
+        panBy(dx / 2, dy / 2);
+        dragging = true;
+        return;
+      }
+      if (!dragging && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 7 && zoomLevel() > 1.01) {
+        dragging = true;
+        svg.setPointerCapture?.(e.pointerId);
+        svg.classList.add('panning');
+        handlers.onTileHover(null, null);
+      }
+      if (dragging) panBy(dx, dy);
+    });
+    const end = (e) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size === 0 && dragging) {
+        dragging = false;
+        suppressClick = true;
+        setTimeout(() => { suppressClick = false; }, 0);
+        svg.classList.remove('panning');
+      }
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
   }
 
   function tileFromEvent(e) {
@@ -128,10 +265,25 @@ export function createBoard(svg, handlers) {
       }
     }
     if (ui.reach) {
+      // One outline around the whole area the unit can reach.
+      const area = new Set(ui.reach.keys());
+      if (ui.selectedTile != null) area.add(ui.selectedTile);
+      let d = '';
+      for (const t of area) {
+        const [cx, cy] = center(s.W, t);
+        el('polygon', { points: pts(corners(cx, cy, HEX + 0.3)), class: 'reach' }, layers.hl);
+        const cs = corners(cx, cy, HEX - 1.2);
+        for (let k = 0; k < 6; k++) {
+          const n = neighborDir(s.W, s.H, t, k);
+          if (n >= 0 && area.has(n)) continue;
+          const [a, b] = [cs[k], cs[(k + 1) % 6]];
+          d += `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`;
+        }
+      }
+      if (d) { el('path', { d, class: 'reach-edge-under' }, layers.hl); el('path', { d, class: 'reach-edge' }, layers.hl); }
       for (const t of ui.reach.keys()) {
         const [cx, cy] = center(s.W, t);
-        el('polygon', { points: pts(corners(cx, cy, HEX - 3)), class: 'reach' }, layers.hl);
-        el('circle', { cx, cy, r: 4, class: 'reach-dot' }, layers.hl);
+        el('circle', { cx, cy, r: 3.2, class: 'reach-dot' }, layers.hl);
       }
     }
     if (ui.selectedTile != null) {
@@ -147,18 +299,33 @@ export function createBoard(svg, handlers) {
 
   function drawCity(c) {
     const [cx, cy] = center(s.W, c.tile);
+    const held = s.units.some((u) => u.tile === c.tile);
     const g = el('g', { class: `town lvl${c.level}`, transform: `translate(${cx},${cy - 4})` }, layers.sites);
-    g.innerHTML = townSprite(c, colorOf(c.owner)) + ribbon(escapeXml(c.name), colorOf(c.owner), 28);
+    g.innerHTML = `<g transform="translate(${held ? -8 : 0},0)">${townSprite(c, colorOf(c.owner))}</g>${ribbon(escapeXml(c.name), colorOf(c.owner), 28)}`;
+  }
+
+  // Units standing in a town step down and shrink a little so the town stays visible.
+  function spot(tile) {
+    const [x, y] = center(s.W, tile);
+    const garrison = s.tiles[tile].city >= 0 && s.cities[s.tiles[tile].city].tile === tile;
+    return garrison ? `translate(${x + 11}px, ${y + 3}px) scale(0.8)` : `translate(${x}px, ${y}px)`;
   }
 
   function placeUnit(gEl, tile, instant = false) {
-    const [x, y] = center(s.W, tile);
+    const tf = spot(tile);
     if (instant) {
       gEl.style.transition = 'none';
-      gEl.style.transform = `translate(${x}px, ${y}px)`;
+      gEl.style.transform = tf;
       gEl.getBoundingClientRect();
       gEl.style.transition = '';
-    } else gEl.style.transform = `translate(${x}px, ${y}px)`;
+    } else gEl.style.transform = tf;
+  }
+
+  function setHover(tile) {
+    if (!hoverPoly) return;
+    if (tile == null) { hoverPoly.setAttribute('points', ''); return; }
+    const [cx, cy] = center(s.W, tile);
+    hoverPoly.setAttribute('points', pts(corners(cx, cy, HEX - 1.5)));
   }
 
   function renderUnits(ui) {
@@ -200,6 +367,8 @@ export function createBoard(svg, handlers) {
     for (const [id, g] of units) {
       if (!alive.has(id)) {
         units.delete(id);
+        const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(g.style.transform);
+        if (m) puff(+m[1], +m[2]);
         g.classList.add('dying');
         setTimeout(() => g.remove(), 350);
       }
@@ -228,7 +397,7 @@ export function createBoard(svg, handlers) {
       g.style.setProperty('--step', `${90 * speed}ms`);
       g.style.transform = `translate(${ax + (tx - ax) * 0.35}px, ${ay + (ty - ay) * 0.35}px)`;
       await sleep(95 * speed);
-      g.style.transform = `translate(${ax}px, ${ay}px)`;
+      g.style.transform = spot(res.from);
     }
     if (UNITS[s.units.find((u) => u.id === res.uid)?.type]?.range > 1 || Math.hypot(tx - ax, ty - ay) > HEX * 2.2) {
       await projectile(ax, ay, tx, ty, Math.max(160, 220 * speed));
@@ -293,6 +462,37 @@ export function createBoard(svg, handlers) {
     setTimeout(() => g.remove(), 450);
   }
 
+  function puff(x, y) {
+    const g = el('g', { class: 'puff', transform: `translate(${x},${y})` }, layers.fx);
+    let out = '';
+    for (let k = 0; k < 7; k++) {
+      const a = (Math.PI * 2 * k) / 7;
+      out += `<circle cx="${(Math.cos(a) * 5).toFixed(1)}" cy="${(Math.sin(a) * 4 - 2).toFixed(1)}" r="${5 + (k % 3)}" style="--dx:${(Math.cos(a) * 14).toFixed(1)}px;--dy:${(Math.sin(a) * 10 - 10).toFixed(1)}px"/>`;
+    }
+    g.innerHTML = out;
+    setTimeout(() => g.remove(), 900);
+  }
+
+  function shockwave(tile, color = '#ffd76a') {
+    const [x, y] = center(s.W, tile);
+    const g = el('g', { class: 'shock', transform: `translate(${x},${y})` }, layers.fx);
+    g.innerHTML = `<circle r="16" stroke="${color}"/><circle r="16" stroke="#fff6cf" class="b"/><circle r="26" fill="url(#spark)" class="flash"/>`;
+    setTimeout(() => g.remove(), 1000);
+  }
+
+  function sparkle(tile) {
+    const [x, y] = center(s.W, tile);
+    const g = el('g', { class: 'sparkle', transform: `translate(${x},${y - 10})` }, layers.fx);
+    let out = '';
+    for (let k = 0; k < 9; k++) {
+      const dx = ((k * 37) % 40) - 20;
+      const d = 0.08 * k;
+      out += `<path d="M0,-4L1,-1L4,0L1,1L0,4L-1,1L-4,0L-1,-1Z" transform="translate(${dx},${(k % 3) * 6})" style="animation-delay:${d.toFixed(2)}s"/>`;
+    }
+    g.innerHTML = out;
+    setTimeout(() => g.remove(), 1500);
+  }
+
   function float(tile, text, cls = '') {
     if (!s) return;
     const [x, y] = center(s.W, tile);
@@ -315,7 +515,14 @@ export function createBoard(svg, handlers) {
       return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
     }).join('');
     el('path', { d, class: 'path' }, layers.path);
+    const [ex, ey] = center(s.W, path[path.length - 1]);
+    el('circle', { cx: ex, cy: ey, r: 9, class: 'path-end' }, layers.path);
+    el('circle', { cx: ex, cy: ey, r: 3.4, class: 'path-dot' }, layers.path);
   }
 
-  return { build, render, animateMove, animateAttack, float, pulse, showPath, tileCenter: (t) => center(s.W, t) };
+  return {
+    build, render, animateMove, animateAttack, float, pulse, showPath, setHover, shockwave, sparkle,
+    zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: () => { view = [...full]; applyView(); },
+    centerOn, zoomLevel, tileCenter: (t) => center(s.W, t),
+  };
 }

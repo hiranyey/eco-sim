@@ -68,7 +68,7 @@ function seedOf(s) {
 // ---------- main entry ----------
 const cache = new Map();
 
-export function paintTerrain(s, scale = 2) {
+export function paintTerrain(s, scale = 2.5) {
   const key = `${s.W}x${s.H}:${s.tiles.map((t) => t.t[0]).join('')}:${s.cities.map((c) => c.tile).join(',')}:${scale}`;
   if (cache.has(key)) return cache.get(key);
   const [mw, mh] = mapSize(s.W, s.H);

@@ -16,6 +16,8 @@ import { eventView, resolveEvent } from './events.js';
 import { createBoard } from './board.js';
 import { tokenSvg, crest, townSprite } from './art/sprites.js';
 import { icon, iconize } from './art/icons.js';
+import { portrait } from './art/portrait.js';
+import { vignette } from './art/vignettes.js';
 import { maxHp } from './world.js';
 import { sfx, isMuted, setMuted } from './audio.js';
 
@@ -75,6 +77,11 @@ function mountGame(s) {
           <svg class="board" role="img" aria-label="The Marches"></svg>
           <div class="banner"></div>
           <div class="tip"></div>
+          <div class="zoom-tools">
+            <button data-act="zoomin" title="Zoom in (+ or mouse wheel)">${icon('plus')}</button>
+            <button data-act="zoomout" title="Zoom out (−)">${icon('minus')}</button>
+            <button data-act="zoomfit" title="Show the whole map (0)">${icon('fit')}</button>
+          </div>
           <div class="map-tools">
             <button data-act="danger" class="chip" title="Shade every hex enemies can strike next turn (D)">${icon('danger')}<span>Danger zones</span></button>
           </div>
@@ -98,7 +105,7 @@ function mountGame(s) {
       <div class="modal"></div>
       <div class="toasts"></div>
     </div>`;
-  ui.board = createBoard(root.querySelector('.board'), { onTileClick, onTileHover, onCancel: deselect });
+  ui.board = createBoard(root.querySelector('.board'), { onTileClick, onTileHover, onCancel: deselect, onView: onZoom });
   ui.board.build(s);
   root.querySelector('.game').addEventListener('click', onClick);
   render();
@@ -184,7 +191,7 @@ function unitCard(u) {
   }
   const ruler = u.type === 'ruler' && u.owner >= 0 ? s.characters[s.factions[u.owner].rulerId] : null;
   return `<div class="card unit-card" style="--c:${owner.color}">
-    <div class="row">${iconSvg(u.type, owner.color)}<div><b>${ruler ? `${esc(ruler.name)}, ` : ''}${U.name}</b><div class="muted">${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` (×${defenseBonus(s, u)} defence)` : ''}</div></div></div>
+    <div class="row">${ruler ? portrait(ruler, owner.color, { cls: 'portrait sm' }) : iconSvg(u.type, owner.color)}<div><b>${ruler ? `${esc(ruler.name)}, ` : ''}${U.name}</b><div class="muted">${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` (×${defenseBonus(s, u)} defence)` : ''}</div></div></div>
     <div class="hpbar"><span style="width:${(u.hp / max) * 100}%"></span><em>${u.hp} / ${max} HP</em></div>
     ${statLine(u)}
     <p class="muted small">${U.desc}</p>
@@ -268,7 +275,7 @@ function paneSelect() {
     const ruler = s.characters[f.rulerId];
     return `<div class="card intro" style="--c:${f.color}">
       <div class="row">${crest(f.key, f.color, 'crest md')}<b class="intro-name">${esc(f.name)}</b></div><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
-      <p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.</p></div>
+      <div class="row ruled">${portrait(ruler, f.color, { cls: 'portrait sm' })}<p>Ruled by <b>${esc(ruler.name)}</b>, age ${ruler.age}.<br><span class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</span></p></div></div>
       ${goals()}
       <div class="howto-mini">
         <p><b>Click a unit</b> to see where it can go. <b>Red rings</b> are enemies in range: hover one to preview the fight.</p>
@@ -313,10 +320,10 @@ function paneMarket() {
   return `<p class="muted small">One market serves all four houses. Every purchase pushes the price up and every sale pushes it down, for everyone. Prices drift back over time. Buy cheap, sell dear, and starve your rivals of what they need.</p>${rows}`;
 }
 
-function charCard(c, label) {
-  if (!c) return `<div class="card char muted">${label}: none. An heir may yet be born.</div>`;
-  return `<div class="card char"><div class="muted small">${label}</div><b>${esc(c.name)}</b> <span class="muted">age ${c.age}</span>
-    <div class="traits">${c.traits.map((t) => `<span class="trait" title="${esc(TRAITS[t].desc)}">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div>`;
+function charCard(c, label, role = 'ruler') {
+  if (!c) return `<div class="card char empty"><div class="portrait-empty">?</div><div><div class="muted small">${label}</div><p class="muted">None yet. An heir may still be born.</p></div></div>`;
+  return `<div class="card char">${portrait(c, me().color, { role, cls: 'portrait lg' })}<div><div class="eyebrow-l">${label}</div><b>${esc(c.name)}</b> <span class="muted">age ${c.age}</span>
+    <div class="traits">${c.traits.map((t) => `<span class="trait" title="${esc(TRAITS[t].desc)}">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div></div>`;
 }
 
 function paneCourt() {
@@ -341,13 +348,13 @@ function paneCourt() {
     }
     return `<div class="dip" style="--c:${x.color}">
       <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badge ${r.war ? 'war' : 'peace'}">${r.war ? 'At war' : 'Peace'}</span></div>
-      <div class="muted small">${esc(ruler.name)} (${ruler.traits.map((t) => TRAITS[t].name).join(', ')}) · ${citiesOf(s, x.id).length} towns · ${x.renown} renown</div>
+      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(ruler.name)}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown</div></div>
       <div class="power"><span>Army</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
       <div class="acts">${actions}</div>
     </div>`;
   }).join('');
   const rn = renownIncome(s, s.playerId);
-  return `${charCard(s.characters[f.rulerId], 'Your ruler')}${charCard(f.heirId != null ? s.characters[f.heirId] : null, 'Heir')}
+  return `${charCard(s.characters[f.rulerId], 'Your ruler')}${charCard(f.heirId != null ? s.characters[f.heirId] : null, 'Heir', 'heir')}
     <p class="muted small">If your ruler dies in battle, the heir takes over, but some towns may revolt. With no heir, a cousin seizes power and the revolts are worse. Each turn is one year.</p>
     <div class="card"><b>${esc(FACTIONS[s.playerId].bonus)}</b><p class="muted small">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
     <div class="small">Renown: <b>${f.renown}</b> / ${RENOWN_TO_WIN}${rn ? ` · +${rn} per turn from shrines and cathedrals` : ''}</div></div>
@@ -450,9 +457,19 @@ async function onTileClick(tile) {
   select(tile === ui.selectedTile && !unitAt(s, tile) ? null : tile);
 }
 
+function onZoom(z) {
+  const zt = root.querySelector('.zoom-tools');
+  if (!zt) return;
+  zt.querySelector('[data-act="zoomout"]').disabled = z <= 1.01;
+  zt.querySelector('[data-act="zoomfit"]').disabled = z <= 1.01;
+  zt.querySelector('[data-act="zoomin"]').disabled = z >= 2.55;
+}
+
 function onTileHover(tile, e) {
   const s = ui.s;
-  if (!s || ui.busy || noHover) return;
+  if (!s || noHover) return;
+  ui.board.setHover(ui.busy ? null : tile);
+  if (ui.busy) return;
   const sel = ui.selectedUnit != null ? s.units.find((u) => u.id === ui.selectedUnit) : null;
   const target = sel ? ui.targets.find((t) => t.tile === tile) : null;
   const newHover = target ? target.id : null;
@@ -469,7 +486,10 @@ function onTileHover(tile, e) {
   } else {
     ui.board.showPath(null);
     const u = tile != null ? unitAt(s, tile) : null;
+    const c = tile != null ? cityAt(s, tile) : null;
     if (u && u.owner !== s.playerId && e) showUnitTip(u, e);
+    else if (c && e && !sel) showTownTip(c, e);
+    else if (tile != null && s.tiles[tile].shrine && e && !sel) tipAt(`<div class="pv"><div class="pv-h">${icon('shrine')} Ancient shrine</div><div class="small">Stand a unit here at the start of your turn for +1 renown.</div></div>`, e);
     else hideTip();
   }
 }
@@ -482,8 +502,11 @@ function tipAt(html, e) {
   if (e) {
     let x = e.clientX - wrap.left + 16;
     let y = e.clientY - wrap.top + 16;
-    if (x + 240 > wrap.width) x -= 260;
-    if (y + 120 > wrap.height) y -= 130;
+    const tw = tip.offsetWidth || 240;
+    const th = tip.offsetHeight || 120;
+    if (x + tw > wrap.width - 8) x = e.clientX - wrap.left - tw - 16;
+    if (y + th > wrap.height - 8) y = Math.max(8, e.clientY - wrap.top - th - 16);
+    x = Math.max(8, x);
     tip.style.left = `${x}px`;
     tip.style.top = `${y}px`;
   } else {
@@ -494,19 +517,47 @@ function tipAt(html, e) {
 function hideTip() { root.querySelector('.tip')?.classList.remove('on'); }
 
 function showPreview(att, def, e) {
-  const p = combatPreview(ui.s, att, def);
-  const owner = def.owner < 0 ? 'Rebel' : ui.s.factions[def.owner].short;
-  tipAt(`<div class="pv"><div class="pv-h">${UNITS[att.type].name} <span class="muted">vs</span> ${owner} ${UNITS[def.type].name}</div>
-    <div class="pv-row"><span>You deal</span><b class="${p.kill ? 'pos' : ''}">${p.dmg}${p.kill ? ' · KILL' : ` (${def.hp - p.dmg} left)`}</b></div>
-    <div class="pv-row"><span>You take</span><b class="${p.dies ? 'neg' : p.ret ? 'warn' : 'pos'}">${p.ret}${p.dies ? ' · YOU DIE' : p.ret === 0 ? (p.kill ? '' : ' (out of reach)') : ` (${att.hp - p.ret} left)`}</b></div>
+  const s = ui.s;
+  const p = combatPreview(s, att, def);
+  const aMax = maxHp(s, att.type, att.owner, att.vet);
+  const dMax = maxHp(s, def.type, def.owner, def.vet);
+  const colorOf = (o) => (o < 0 ? '#6d6a75' : s.factions[o].color);
+  const side = (u, max, loss, label) => {
+    const left = Math.max(0, u.hp - loss);
+    return `<div class="pv-side">${tokenSvg(u.type, colorOf(u.owner))}<div class="pv-info">
+      <div class="pv-name">${label}</div>
+      <div class="pv-bar"><span class="keep" style="width:${(left / max) * 100}%"></span><span class="loss" style="left:${(left / max) * 100}%;width:${(Math.min(u.hp, loss) / max) * 100}%"></span></div>
+      <div class="pv-num">${loss ? `<span class="neg">−${loss}</span> · ` : '<span class="muted">unharmed</span> · '}${u.hp} → <b>${left}</b><span class="muted"> / ${max}</span></div></div></div>`;
+  };
+  const gain = p.dmg / dMax - p.ret / aMax;
+  const [cls, verdict] = p.dies ? ['bad', 'Your unit will die'] : p.kill ? ['good', p.ret ? 'Destroys them' : 'Destroys them, unharmed'] : p.ret === 0 ? ['good', 'Free hit: no strike back'] : gain > 0.15 ? ['good', 'Good trade'] : gain < -0.15 ? ['bad', 'Bad trade'] : ['even', 'Even trade'];
+  const owner = def.owner < 0 ? 'Rebel' : s.factions[def.owner].short;
+  tipAt(`<div class="pv">
+    ${side(att, aMax, p.ret, `Your ${UNITS[att.type].name}`)}
+    <div class="pv-vs"><span>vs</span></div>
+    ${side(def, dMax, p.dmg, `${esc(owner)} ${UNITS[def.type].name}`)}
+    <div class="pv-verdict ${cls}">${verdict}</div>
     ${p.kill && UNITS[att.type].range === 1 ? '<div class="muted small">Your unit will advance into the hex.</div>' : ''}
     ${noHover ? '<div class="small gold">Tap again to attack</div>' : ''}</div>`, e);
+}
+
+function showTownTip(c, e) {
+  const s = ui.s;
+  const owner = c.owner < 0 ? null : s.factions[c.owner];
+  const g = unitAt(s, c.tile);
+  const status = c.owner === s.playerId ? 'Your town' : !owner ? 'Free town: walk in to claim it' : hostile(s, s.playerId, c.owner) ? 'At war: take it when it is empty' : 'At peace with you';
+  tipAt(`<div class="pv town-tip"><div class="pv-h">${owner ? crest(owner.key, owner.color, 'crest sm') : ''}${esc(c.name)}${c.capital ? ' <span class="tag">Capital</span>' : ''}</div>
+    <div class="small">${owner ? esc(owner.name) : 'Rebels'} · Level ${c.level}${c.buildings.length ? ` · ${c.buildings.map((b) => BUILDINGS[b].name).join(', ')}` : ''}</div>
+    <div class="small">${g ? `Garrison: ${UNITS[g.type].name} (${g.hp} HP)` : 'No garrison'}</div>
+    <div class="small muted">${status}</div></div>`, e);
 }
 
 function showUnitTip(u, e) {
   const owner = u.owner < 0 ? 'Rebels' : ui.s.factions[u.owner].name;
   const U = UNITS[u.type];
-  tipAt(`<div class="pv"><div class="pv-h">${esc(owner)}: ${U.name}</div><div class="small stats">${icon('hp')}${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} ${icon('attack')}${baseAtk(ui.s, u.owner, u.type)} ${icon('defence')}${baseDef(ui.s, u.owner, u.type)} ${icon('move')}${movePoints(ui.s, u)} ${icon('range')}${U.range}</div></div>`, e);
+  const ruler = u.type === 'ruler' && u.owner >= 0 ? ui.s.characters[ui.s.factions[u.owner].rulerId] : null;
+  const town = cityAt(ui.s, u.tile);
+  tipAt(`<div class="pv">${ruler ? `<div class="tip-ruler">${portrait(ruler, ui.s.factions[u.owner].color, { cls: 'portrait xs' })}<div><b>${esc(ruler.name)}</b>, age ${ruler.age}<div class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</div></div></div>` : ''}<div class="pv-h">${esc(owner)}: ${U.name}${u.vet ? ' ★' : ''}</div>${town ? `<div class="small muted">Holding ${esc(town.name)}</div>` : ''}<div class="small stats">${icon('hp')}${u.hp}/${maxHp(ui.s, u.type, u.owner, u.vet)} ${icon('attack')}${baseAtk(ui.s, u.owner, u.type)} ${icon('defence')}${baseDef(ui.s, u.owner, u.type)} ${icon('move')}${movePoints(ui.s, u)} ${icon('range')}${U.range}</div></div>`, e);
 }
 
 async function doMove(u, tile) {
@@ -555,6 +606,8 @@ async function doAttack(u, target) {
 function onCapture(cap, tile) {
   sfx.capture();
   ui.board.pulse(tile, 'pulse gold');
+  const owner = ui.s.cities[cap.cityId]?.owner;
+  ui.board.shockwave(tile, owner >= 0 ? ui.s.factions[owner].color : '#ffd76a');
   ui.board.float(tile, `+${cap.gain} ★`, 'renown');
 }
 
@@ -580,7 +633,19 @@ async function onClick(e) {
     return true;
   };
   switch (act) {
-    case 'tab': ui.tab = b.dataset.v; ui.confirmWar = null; render(); break;
+    case 'tab': {
+      ui.tab = b.dataset.v;
+      ui.confirmWar = null;
+      render();
+      const pane = root.querySelector('.pane');
+      pane.classList.remove('fade');
+      void pane.offsetWidth;
+      pane.classList.add('fade');
+      clearTimeout(pane._fade);
+      pane._fade = setTimeout(() => pane.classList.remove('fade'), 300);
+      pane.scrollTop = 0;
+      break;
+    }
     case 'end': if (myTurn()) await playerEndTurn(); break;
     case 'next': nextUnit(); break;
     case 'hold': {
@@ -590,8 +655,8 @@ async function onClick(e) {
       break;
     }
     case 'recruit': r(recruit(s, fid, +b.dataset.v, b.dataset.u), () => { sfx.build(); s.tut = { ...(s.tut ?? {}), recruited: true }; }); break;
-    case 'upgrade': r(upgradeCity(s, fid, +b.dataset.v), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
-    case 'build': r(build(s, fid, +b.dataset.v, b.dataset.b), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); }); break;
+    case 'upgrade': r(upgradeCity(s, fid, +b.dataset.v), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); ui.board.sparkle(s.cities[+b.dataset.v].tile); }); break;
+    case 'build': r(build(s, fid, +b.dataset.v, b.dataset.b), () => { sfx.build(); ui.board.pulse(s.cities[+b.dataset.v].tile, 'pulse gold'); ui.board.sparkle(s.cities[+b.dataset.v].tile); }); break;
     case 'research': r(setResearch(s, fid, b.dataset.v), () => { sfx.build(); s.tut = { ...(s.tut ?? {}), researched: true }; }); break;
     case 'adopt': r(adoptPolicy(s, fid, b.dataset.v), () => sfx.coin()); break;
     case 'droppol': r(dropPolicy(s, fid, b.dataset.v)); break;
@@ -600,6 +665,9 @@ async function onClick(e) {
     case 'nowar': ui.confirmWar = null; render(); break;
     case 'war': ui.confirmWar = null; r(declareWar(s, fid, +b.dataset.v), () => sfx.bad()); break;
     case 'peace': r(offerPeace(s, fid, +b.dataset.v, +b.dataset.gold), () => sfx.event()); break;
+    case 'zoomin': ui.board.zoomIn(); break;
+    case 'zoomout': ui.board.zoomOut(); break;
+    case 'zoomfit': ui.board.resetView(); break;
     case 'help': showHelp(false); break;
     case 'danger': toggleDanger(); break;
     case 'undo': undoMove(); break;
@@ -636,6 +704,7 @@ function nextUnit() {
   const u = ready[(idx + 1) % ready.length];
   sfx.select();
   select(u.tile);
+  ui.board.centerOn(u.tile);
 }
 
 document.addEventListener('keydown', (e) => {
@@ -652,6 +721,9 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'u' || ((e.ctrlKey || e.metaKey) && k === 'z')) undoMove();
   else if (k === 'd') toggleDanger();
   else if (k === 'h' || k === '?') showHelp(false);
+  else if (k === '+' || k === '=') ui.board.zoomIn();
+  else if (k === '-' || k === '_') ui.board.zoomOut();
+  else if (k === '0') ui.board.resetView();
 });
 
 // ---------------------------------------------------------------- turn flow
@@ -667,7 +739,7 @@ async function playerEndTurn() {
     const fid = currentFaction(s);
     const f = s.factions[fid];
     const speed = SPEEDS[prefs.speed];
-    banner(`${f.name}`, f.color);
+    banner(`${f.name}`, f.color, f);
     render();
     for (const res of aiTurn(s, fid)) {
       if (speed > 0) await animateAI(res, speed);
@@ -680,7 +752,7 @@ async function playerEndTurn() {
   autosave();
   if (s.winner) return showEnd();
   sfx.turn();
-  banner(`Turn ${s.turn} · Your move`, me().color);
+  banner(`Turn ${s.turn} · Your move`, me().color, me());
   report(s.log.slice(Math.max(0, logStart - (s.log.length > 190 ? 10 : 0))).filter((l) => l.turn >= turnStart));
   afterPlayerTurnStarts();
 }
@@ -710,12 +782,16 @@ function afterPlayerTurnStarts() {
 
 function nextUnitIfAny() {
   const r = readyUnits(ui.s, ui.s.playerId);
-  if (r.length && ui.selectedUnit == null) select(r.find((u) => u.type !== 'ruler')?.tile ?? r[0].tile);
+  if (r.length && ui.selectedUnit == null) {
+    const t = r.find((u) => u.type !== 'ruler')?.tile ?? r[0].tile;
+    select(t);
+    ui.board.centerOn(t);
+  }
 }
 
-function banner(text, color) {
+function banner(text, color, f = null) {
   const b = root.querySelector('.banner');
-  b.textContent = text;
+  b.innerHTML = `${f ? crest(f.key, f.color, 'crest banner-crest') : ''}<span>${esc(text)}</span>`;
   b.style.setProperty('--c', color);
   b.classList.remove('on');
   void b.offsetWidth;
@@ -743,7 +819,7 @@ function showEvent() {
   const ev = s.pendingEvents[0];
   const v = eventView(s, ev);
   sfx.event();
-  openModal(`<div class="eyebrow">Turn ${s.turn} · ${esc(me().name)}</div><h2>${esc(v.title)}</h2><p>${esc(v.text)}</p>
+  openModal(`<div class="eyebrow">Turn ${s.turn} · ${esc(me().name)}</div>${vignette(ev.id)}<h2>${esc(v.title)}</h2><p>${esc(v.text)}</p>
     <div class="options">${v.options.map((o, i) => `<button class="option" data-opt="${i}" ${o.ok ? '' : 'disabled'}><b>${esc(o.label)}</b><small>${esc(o.hint)}</small></button>`).join('')}</div>`, { closable: false });
   root.querySelector('.modal').querySelectorAll('[data-opt]').forEach((b) => b.addEventListener('click', () => {
     const err = resolveEvent(s, +b.dataset.opt);
@@ -811,6 +887,7 @@ function showEnd() {
   openModal(`<div class="end ${won ? 'won' : 'lost'}">
     <div class="eyebrow">Turn ${s.turn}</div>
     <h2>${won ? 'Victory!' : 'Defeat'}</h2>
+    <div class="end-portrait">${portrait(s.characters[w.rulerId], w.color, { cls: 'portrait xl' })}${crest(w.key, w.color, 'crest lg')}</div>
     <p>${won ? `${esc(f.name)} ${why}. The Marches are yours.` : `${esc(w.name)} ${why}.`}</p>
     <div class="ranking">${ranking.map((x, i) => `<div class="row ${x.id === s.playerId ? 'me' : ''}"><span>#${i + 1} ${crest(x.key, x.color, 'crest xs')}${esc(x.name)}${x.alive ? '' : ' †'}</span><b>${x.renown}</b></div>`).join('')}</div>
     <h4>Where your renown came from</h4>
@@ -818,6 +895,13 @@ function showEnd() {
     <div class="statsline"><span>${icon('attack')}${f.stats.kills} enemies slain</span><span>${icon('castle')}${f.stats.captures} towns taken</span><span>${icon('skull')}${f.stats.lost} units lost</span><span>${icon('hammer')}${f.stats.built} works built</span></div>
     <div class="actions"><button class="primary" data-again>Play again</button><button class="ghost" data-close>Look at the map</button></div></div>`);
   root.querySelector('[data-again]').addEventListener('click', () => showStart());
+  if (won && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.innerHTML = Array.from({ length: 70 }, (_, i) => `<i style="left:${(i * 37) % 100}%;--t:${2.4 + ((i * 13) % 20) / 10}s;--d:${((i * 7) % 15) / 10}s;--x:${((i * 29) % 120) - 60}px;--r:${((i * 53) % 720) - 360}deg"></i>`).join('');
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 6000);
+  }
 }
 
 // Summarise what happened during the enemies' turns.
@@ -868,7 +952,7 @@ function loadSave() {
 function showStart() {
   const saved = loadSave();
   let choice = { faction: 0, difficulty: 'normal', seed: Math.random().toString(36).slice(2, 8) };
-  root.innerHTML = `<div class="start">
+  root.innerHTML = `<div class="backdrop"></div><div class="start">
     <div class="hero">
       <div class="hero-crests">${FACTIONS.map((F) => crest(F.key, F.color, 'crest md')).join('')}</div>
       <h1>Hex<span>march</span></h1>
@@ -890,12 +974,15 @@ function showStart() {
       </div>
     </div></div>`;
   const svg = root.querySelector('.preview svg');
-  const board = createBoard(svg, { onTileClick: () => {}, onTileHover: () => {} });
+  const board = createBoard(svg, { onTileClick: () => {}, onTileHover: () => {}, interactive: false });
   const draw = () => {
     root.querySelector('.seed').value = choice.seed;
     const s = newGame({ seed: choice.seed, playerFaction: choice.faction, difficulty: choice.difficulty });
     board.build(s);
     board.render({ myTurn: false });
+    const art = svg.querySelector('image')?.getAttribute('href');
+    const bd = root.querySelector('.backdrop');
+    if (art && bd) bd.style.backgroundImage = `url(${art})`;
     root.querySelectorAll('.house').forEach((b) => b.classList.toggle('on', +b.dataset.house === choice.faction));
     root.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === choice.difficulty));
   };
@@ -921,4 +1008,4 @@ function showStart() {
 
 showStart();
 window.__hex = ui;
-window.__hexDebug = { showEnd, render, aiTurn };
+window.__hexDebug = { showEnd, render, aiTurn, showEvent };
