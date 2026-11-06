@@ -2,17 +2,21 @@
 import { newGame, titled } from './world.js';
 import {
   UNITS, RECRUITABLE, BUILDINGS, GOODS, TERRAIN, TRAITS, FACTIONS, DIFFICULTY, RENOWN_TO_WIN, TURN_LIMIT, CITY_LEVELS,
-  TECHS, BRANCHES, POLICIES, POLICY_COST,
+  TECHS, BRANCHES, POLICIES, POLICY_COST, GIFT_GOLD,
 } from './data.js';
 import {
   unitAt, cityAt, citiesOf, reachable, pathTo, attackTargets, combatPreview, moveUnit, attack, recruit,
   upgradeCity, build, trade, quote, income, unitCost, upgradeCost, buildingCost, canAfford, relation, declareWar,
-  offerPeace, peaceTerms, strength, endTurn, beginTurn, currentFaction, canAttack, readyUnits, hostile, defenseBonus,
+  offerPeace, endTurn, beginTurn, currentFaction, canAttack, readyUnits, hostile, defenseBonus,
   recruitLimit, renownIncome, movePoints, threatTiles, recruitSpot, baseAtk, baseDef, techAvailable, setResearch,
   policySlots, policyAvailable, adoptPolicy, dropPolicy,
 } from './rules.js';
 import { aiTurn } from './ai.js';
-import { eventView, resolveEvent } from './events.js';
+import { eventView, resolveEvent, pruneEvents } from './events.js';
+import {
+  opinion, mood, evaluateDeal, proposeDeal, treatyList, sendGift, releaseVassal, vassalsOf, teachable, heirOf,
+  TREATIES, ensureDiplomacy, bloc,
+} from './diplomacy.js';
 import { createBoard } from './board.js';
 import { tokenSvg, crest, townSprite } from './art/sprites.js';
 import { icon, iconize } from './art/icons.js';
@@ -97,6 +101,7 @@ function mountGame(s) {
             <button data-act="tab" data-v="market">${icon('scales')}<span>Market</span></button>
             <button data-act="tab" data-v="research">${icon('book')}<span>Research</span></button>
             <button data-act="tab" data-v="court">${icon('crown')}<span>Court</span></button>
+            <button data-act="tab" data-v="diplo">${icon('handshake')}<span>Diplomacy</span></button>
             <button data-act="tab" data-v="log">${icon('scroll')}<span>Chronicle</span></button>
           </nav>
           <div class="pane"></div>
@@ -144,14 +149,14 @@ function renderBar() {
   root.querySelector('.turn').innerHTML = `<b>Turn ${s.turn}</b><small>of ${TURN_LIMIT}</small>`;
   const r = (ic, v, d, title, warn = false) => `<div class="r${warn ? ' warn' : ''}" title="${title}">${icon(ic)}<b>${v}</b><small class="${d < 0 ? 'neg' : 'pos'}">${d >= 0 ? '+' : ''}${d}</small></div>`;
   root.querySelector('.res').innerHTML =
-    r('💰', f.gold, inc.gold, 'Gold: recruits, upgrades and buildings') +
+    r('💰', f.gold, inc.gold, `Gold: recruits, upgrades and buildings${inc.trade ? ` (trade +${inc.trade})` : ''}${inc.tribute ? ` (tribute ${inc.tribute > 0 ? '+' : ''}${inc.tribute})` : ''}`) +
     r('🌾', f.grain, net, `Grain: each soldier eats 1 per turn (${inc.grain} grown, ${inc.upkeep} eaten). If it runs out, soldiers starve.`, f.grain + net < 0) +
     r('🪵', f.timber, inc.timber, 'Timber: archers, catapults, upgrades and buildings') +
     r('⛏', f.iron, inc.iron, 'Iron: spearmen, cavalry, knights') +
     loreChip(f, inc.lore);
   root.querySelector('.race').innerHTML = s.factions.map((x) => `
-    <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown">
-      <span class="nm">${crest(x.key, x.color, 'crest xs')}${esc(x.short)}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
+    <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown${x.overlord != null ? `, vassal of ${esc(s.factions[x.overlord].short)}` : ''}">
+      <span class="nm">${crest(x.key, x.color, 'crest xs')}${esc(x.short)}${x.overlord != null ? icon('chain', 'vas') : ''}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
     </div>`).join('');
 }
 
@@ -166,7 +171,7 @@ function loreChip(f, gain) {
 function renderPane() {
   root.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === ui.tab));
   const pane = root.querySelector('.pane');
-  const html = { select: paneSelect, market: paneMarket, research: paneResearch, court: paneCourt, log: paneLog }[ui.tab]();
+  const html = { select: paneSelect, market: paneMarket, research: paneResearch, court: paneCourt, diplo: paneDiplo, log: paneLog }[ui.tab]();
   if (pane.dataset.html !== html) {
     const top = pane.scrollTop;
     pane.innerHTML = html;
@@ -216,7 +221,7 @@ function cityCard(c) {
     <div class="row"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite(c, owner.color)}</svg><div><b>${esc(c.name)}</b>${c.capital ? ' <span class="tag">Capital</span>' : ''}<div class="muted">${esc(owner.name)} · Level ${c.level}</div></div></div>
     <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${c.capital ? `<span>${icon('grain')}+2</span>` : ''}${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="muted small">per turn</span></div>`;
   if (!mine) {
-    out += `<p class="muted small">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : 'You are at peace with its owner.'}</p></div>`;
+    out += `<p class="muted small">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : peaceWords(c.owner)}</p></div>`;
     return out;
   }
   const can = myTurn();
@@ -352,39 +357,255 @@ function charCard(c, label, role = 'ruler') {
     <div class="traits">${c.traits.map((t) => `<span class="trait" title="${esc(TRAITS[t].desc)}">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div></div>`;
 }
 
+function spouseLine(c) {
+  if (!c?.spouseId) return '';
+  const sp = ui.s.characters[c.spouseId];
+  const house = sp.house != null ? ui.s.factions[sp.house] : null;
+  return `<div class="spouse">${portrait(sp, house?.color ?? '#888888', { cls: 'portrait xs' })}<span class="small">${c.age < 16 ? 'Betrothed to' : 'Wed to'} <b>${esc(sp.name)}</b>${house ? ` of ${esc(house.name)}` : ''}, age ${sp.age}</span></div>`;
+}
+
 function paneCourt() {
   const s = ui.s;
   const f = me();
-  const can = myTurn();
-  const mine = strength(s, s.playerId);
-  const rows = s.factions.filter((x) => x.id !== s.playerId).map((x) => {
-    if (!x.alive) return `<div class="dip dead"><b>${esc(x.name)}</b> <span class="muted">destroyed</span></div>`;
-    const r = relation(s, s.playerId, x.id);
-    const theirs = strength(s, x.id);
-    const ruler = s.characters[x.rulerId];
-    let actions = '';
-    if (r.war) {
-      const { need } = peaceTerms(s, s.playerId, x.id);
-      actions = need === Infinity ? '<span class="muted small">They will not talk peace while winning this badly.</span>'
-        : `<button data-act="peace" data-v="${x.id}" data-gold="${need}" ${can && f.gold >= need ? '' : 'disabled'}>Offer peace${need ? ` (+${need}${icon('gold')} tribute)` : ''}</button>`;
-    } else if (ui.confirmWar === x.id) {
-      actions = `<span class="small">Declare war? Costs 2 renown.</span> <button class="danger" data-act="war" data-v="${x.id}">Declare war</button><button class="ghost" data-act="nowar">Cancel</button>`;
-    } else {
-      actions = r.truce > s.turn ? `<span class="muted small">Truce until turn ${r.truce}</span>` : `<button class="ghost danger-text" data-act="askwar" data-v="${x.id}" ${can ? '' : 'disabled'}>Declare war…</button>`;
+  const ruler = s.characters[f.rulerId];
+  const heir = f.heirId != null ? s.characters[f.heirId] : null;
+  const rn = renownIncome(s, s.playerId);
+  return `${charCard(ruler, 'Your ruler')}${spouseLine(ruler)}${charCard(heir, 'Heir', 'heir')}${spouseLine(heir)}
+    <p class="muted small">If your ruler dies in battle, the heir takes over, but some towns may revolt. With no heir, a cousin seizes power and the revolts are worse. Each turn is one year. Wed your heir into another house from the Diplomacy tab.</p>
+    <div class="card"><b>${esc(FACTIONS[s.playerId].bonus)}</b><p class="muted small">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
+    <div class="small">Renown: <b>${f.renown}</b> / ${RENOWN_TO_WIN}${rn ? ` · +${rn} per turn from shrines, cathedrals and vassals` : ''}</div></div>
+    <button class="ghost wide" data-act="tab" data-v="diplo">${icon('handshake')} Deal with the other houses</button>`;
+}
+
+// ---------------------------------------------------------------- diplomacy
+const TREATY_ICON = { war: 'attack', truce: 'dove', alliance: 'handshake', pact: 'seal', trade: 'scales', vassal: 'chain' };
+
+// The web of the Marches: each house a node, each pair a line styled by how they stand.
+function diploWeb() {
+  const s = ui.s;
+  const P = s.playerId;
+  const others = s.factions.filter((x) => x.id !== P).map((x) => x.id);
+  // You sit in the middle; the rivals form a triangle around you, so no two lines share a midpoint.
+  const pos = { [P]: [120, 92] };
+  [[30, 140], [120, 22], [210, 140]].forEach((p, i) => { pos[others[i]] = p; });
+  let lines = '';
+  let marks = '';
+  for (let a = 0; a < 4; a++) {
+    for (let b = a + 1; b < 4; b++) {
+      const A = s.factions[a];
+      const B = s.factions[b];
+      const [x1, y1] = pos[a];
+      const [x2, y2] = pos[b];
+      if (!A.alive || !B.alive) { lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="wl dead"/>`; continue; }
+      const r = relation(s, a, b);
+      const vas = A.overlord === b || B.overlord === a;
+      const k = r.war ? 'war' : vas ? 'vassal' : r.alliance ? 'alliance' : r.pact > s.turn ? 'pact' : r.trade ? 'trade' : r.truce > s.turn ? 'truce' : 'none';
+      lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="wl ${k}"/>`;
+      const extra = [r.trade && k !== 'trade' && !r.war ? 'trade' : null, r.pact > s.turn && k !== 'pact' && !r.war ? 'pact' : null].filter(Boolean);
+      const shown = [k, ...extra].filter((x) => x !== 'none');
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      shown.forEach((x, i) => {
+        const ox = mx + (i - (shown.length - 1) / 2) * 15;
+        marks += `<g class="wm ${x}" transform="translate(${ox - 6.5},${my - 6.5})"><circle cx="6.5" cy="6.5" r="7.5"/><svg width="13" height="13" viewBox="0 0 24 24">${icon(TREATY_ICON[x]).replace(/^<svg[^>]*>|<\/svg>$/g, '')}</svg></g>`;
+      });
     }
+  }
+  const nodes = s.factions.map((x) => {
+    const [cx, cy] = pos[x.id];
+    const c = crest(x.key, x.color, '').replace('<svg class=""', `<svg x="${cx - 13}" y="${cy - 15}" width="26" height="30"`);
+    return `<g class="wn ${x.alive ? '' : 'dead'}">${c}<text x="${cx}" y="${cy + 25}" text-anchor="middle">${esc(x.id === P ? 'You' : x.short)}${x.overlord != null ? ' ⛓' : ''}</text></g>`;
+  }).join('');
+  return ` <svg class="web" viewBox="0 0 240 172" role="img" aria-label="Relations between the houses">${lines}${marks}${nodes}</svg>
+    <div class="legend">${['war', 'alliance', 'pact', 'trade', 'vassal', 'truce'].map((k) => `<span class="lg ${k}"><i></i>${{ war: 'War', alliance: 'Alliance', pact: 'Pact', trade: 'Trade', vassal: 'Vassal', truce: 'Truce' }[k]}</span>`).join('')}</div>`;
+}
+
+function opinionMeter(v) {
+  const m = mood(v);
+  const w = Math.abs(v) / 2;
+  return `<div class="opm ${m.cls}" title="Opinion of you: ${v}"><span class="opbar"><i class="${v < 0 ? 'neg' : 'pos'}" style="${v < 0 ? `right:50%;width:${w}%` : `left:50%;width:${w}%`}"></i></span><b>${v > 0 ? '+' : ''}${v}</b><span class="mood">${m.name}</span></div>`;
+}
+
+function reasons(parts, cls = '') {
+  return `<ul class="why ${cls}">${parts.map((p) => `<li class="${p.v > 0 ? 'pos' : 'neg'}"><span>${esc(p.text)}</span><b>${p.v > 0 ? '+' : ''}${p.v}</b></li>`).join('') || '<li class="muted">No strong feelings either way</li>'}</ul>`;
+}
+
+function paneDiplo() {
+  const s = ui.s;
+  const f = me();
+  const P = s.playerId;
+  const can = myTurn();
+  const inc = income(s, P);
+  const mine = bloc(s, P);
+  const rows = s.factions.filter((x) => x.id !== P).map((x) => {
+    if (!x.alive) return `<div class="dip dead"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b> <span class="muted">destroyed</span></div>`;
+    const r = relation(s, P, x.id);
+    const op = opinion(s, x.id, P);
+    const ruler = s.characters[x.rulerId];
+    const theirs = bloc(s, x.id);
+    const badges = treatyList(s, P, x.id);
+    if (!r.war && !badges.length) badges.push({ k: 'peace', text: 'At peace' });
+    let war = '';
+    if (r.war) war = '';
+    else if (ui.confirmWar === x.id) {
+      const oath = r.alliance ? 'This betrays your alliance: −6 renown, and every court will remember.' : r.pact > s.turn ? 'This breaks your pact: −4 renown, and every court will remember.' : 'Costs 2 renown.';
+      const allies = s.factions.filter((o) => o.alive && o.id !== P && o.id !== x.id && (relation(s, o.id, x.id).alliance || x.overlord === o.id || o.overlord === x.id));
+      war = `<div class="confirm"><span class="small">Declare war on ${esc(x.short)}? ${oath}${allies.length ? ` ${allies.map((o) => esc(o.short)).join(' and ')} may come to their aid.` : ''}</span><div><button class="danger" data-act="war" data-v="${x.id}">Declare war</button><button class="ghost" data-act="nowar">Cancel</button></div></div>`;
+    } else if (x.overlord === P) {
+      war = `<button class="ghost" data-act="release" data-v="${x.id}" ${can ? '' : 'disabled'}>Release vassal</button>`;
+    } else if (r.truce <= s.turn) {
+      war = `<button class="ghost danger-text" data-act="askwar" data-v="${x.id}" ${can ? '' : 'disabled'}>${icon('attack')}War…</button>`;
+    }
+    const lord = x.overlord != null ? s.factions[x.overlord] : null;
     return `<div class="dip" style="--c:${x.color}">
-      <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badge ${r.war ? 'war' : 'peace'}">${r.war ? 'At war' : 'Peace'}</span></div>
-      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown</div></div>
-      <div class="power"><span>Army</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
-      <div class="acts">${actions}</div>
+      <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badges">${badges.map((b) => `<span class="badge ${b.k}">${icon(TREATY_ICON[b.k] ?? 'dove')}${esc(b.text)}</span>`).join('')}</span></div>
+      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown${lord ? ` · vassal of ${esc(lord.short)}` : ''}</div></div>
+      ${opinionMeter(op.total)}
+      <details class="whybox"><summary>Why they feel this way</summary>${reasons(op.parts)}</details>
+      <div class="power"><span>Might</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
+      <div class="acts">
+        ${x.overlord != null && x.overlord !== P ? '<span class="muted small">Speaks only through its liege.</span>' : `<button class="primary-lite" data-act="deal" data-v="${x.id}" ${can ? '' : 'disabled'}>${icon('handshake')}${r.war ? 'Negotiate peace' : 'Negotiate'}</button>`}
+        ${!r.war ? `<button class="ghost" data-act="gift" data-v="${x.id}" ${can && f.gold >= GIFT_GOLD ? '' : 'disabled'} title="Send ${GIFT_GOLD} gold: they will think better of you for a while">${icon('gift')}Gift ${GIFT_GOLD}${icon('gold')}</button>` : ''}
+        ${war}
+      </div>
     </div>`;
   }).join('');
-  const rn = renownIncome(s, s.playerId);
-  return `${charCard(s.characters[f.rulerId], 'Your ruler')}${charCard(f.heirId != null ? s.characters[f.heirId] : null, 'Heir', 'heir')}
-    <p class="muted small">If your ruler dies in battle, the heir takes over, but some towns may revolt. With no heir, a cousin seizes power and the revolts are worse. Each turn is one year.</p>
-    <div class="card"><b>${esc(FACTIONS[s.playerId].bonus)}</b><p class="muted small">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
-    <div class="small">Renown: <b>${f.renown}</b> / ${RENOWN_TO_WIN}${rn ? ` · +${rn} per turn from shrines and cathedrals` : ''}</div></div>
-    <h4>The other houses</h4>${rows}`;
+  const flows = [];
+  if (inc.trade) flows.push(`${icon('scales')} Trade <b class="pos">+${inc.trade}</b>`);
+  if (inc.tribute > 0) flows.push(`${icon('chain')} Tribute from vassals <b class="pos">+${inc.tribute}</b>`);
+  const vs = vassalsOf(s, P);
+  if (vs.length) flows.push(`${icon('renown')} Vassals <b class="pos">+${vs.length}</b> renown`);
+  return `${diploWeb()}
+    ${flows.length ? `<div class="card flows small">${flows.join(' · ')} <span class="muted">per turn</span></div>` : ''}
+    <p class="muted small">Every house keeps a ledger of what you have done to it. Make a deal from the negotiation table: they accept when the terms add up in their favour, and you can see exactly why.</p>
+    ${rows}`;
+}
+
+// ---------- negotiation table
+function dealItems() {
+  const d = ui.deal;
+  const P = ui.s.playerId;
+  const items = [];
+  if (d.giveGold) items.push({ k: 'gold', by: P, n: d.giveGold });
+  if (d.askGold) items.push({ k: 'gold', by: d.with, n: d.askGold });
+  for (const id of d.giveTowns) items.push({ k: 'town', by: P, id });
+  for (const id of d.askTowns) items.push({ k: 'town', by: d.with, id });
+  for (const key of d.giveTechs) items.push({ k: 'tech', by: P, key });
+  for (const key of d.askTechs) items.push({ k: 'tech', by: d.with, key });
+  for (const k of d.treaties) items.push(k.startsWith('joinwar:') ? { k: 'joinwar', target: +k.split(':')[1] } : { k });
+  return items;
+}
+
+function showDeal(fid) {
+  ui.deal ??= null;
+  if (!ui.deal || ui.deal.with !== fid) {
+    ui.deal = { with: fid, giveGold: 0, askGold: 0, giveTowns: [], askTowns: [], giveTechs: [], askTechs: [], treaties: relation(ui.s, ui.s.playerId, fid).war ? ['peace'] : [] };
+  }
+  renderDeal();
+}
+
+function renderDeal() {
+  const s = ui.s;
+  const d = ui.deal;
+  const P = s.playerId;
+  const X = s.factions[d.with];
+  const f = me();
+  const r = relation(s, P, d.with);
+  const items = dealItems();
+  const ev = evaluateDeal(s, P, d.with, items);
+  const chip = (group, val, label, on, ok = true, title = '') => `<button class="chip-t ${on ? 'on' : ''}" data-dg="${group}" data-dv="${val}" ${ok || on ? '' : 'disabled'} ${title ? `title="${esc(title)}"` : ''}>${on ? icon('check') : ''}${label}</button>`;
+  const stepper = (side, have) => {
+    const v = side === 'give' ? d.giveGold : d.askGold;
+    return `<div class="stepper"><span>${icon('gold')}<b>${v}</b><small class="muted">/ ${have}</small></span><span class="steps">${[-10, -5, 5, 10].map((n) => `<button data-dgold="${side}" data-dn="${n}" ${(n < 0 && v <= 0) || (n > 0 && v >= have) ? 'disabled' : ''}>${n > 0 ? '+' : '−'}${Math.abs(n)}</button>`).join('')}</span></div>`;
+  };
+  const towns = (fid, list, group) => {
+    const cs = citiesOf(s, fid).filter((c) => !c.capital);
+    return cs.length ? cs.map((c) => chip(group, c.id, `${icon('castle')}${esc(c.name)} <small>L${c.level}</small>`, list.includes(c.id))).join('') : '<span class="muted small">No towns besides the capital</span>';
+  };
+  const techs = (from, to, list, group) => {
+    const ts = teachable(s, from, to);
+    return ts.length ? ts.map((k) => chip(group, k, `${icon('book')}${esc(TECHS[k].name)}`, list.includes(k))).join('') : '<span class="muted small">Nothing to teach</span>';
+  };
+  const treaty = (k, extra = '') => {
+    const on = d.treaties.includes(k);
+    const probe = evaluateDeal(s, P, d.with, [...(r.war && k !== 'peace' ? [{ k: 'peace' }] : []), k.startsWith('joinwar:') ? { k: 'joinwar', target: +k.split(':')[1] } : { k }]);
+    const blocked = probe.problem && !probe.problem.includes('offer peace');
+    const base = k.split(':')[0];
+    return chip('treaty', k, `${icon({ peace: 'dove', pact: 'seal', trade: 'scales', alliance: 'handshake', marriage: 'ring', vassal: 'chain', joinwar: 'attack' }[base])}${esc(extra || TREATIES[base].name)}`, on, !blocked, blocked ? probe.problem : TREATIES[base].desc);
+  };
+  const wars = s.factions.filter((o) => o.alive && o.id !== P && o.id !== d.with && r && relation(s, P, o.id).war);
+  const treatyRow = [
+    r.war ? treaty('peace') : '',
+    treaty('pact'), treaty('trade'), treaty('alliance'),
+    heirOf(s, P) ? treaty('marriage', `Wed ${titled(heirOf(s, P), 'heir')}`) : '',
+    treaty('vassal'),
+    ...wars.map((o) => treaty(`joinwar:${o.id}`, `Join war on ${o.short}`)),
+  ].join('');
+  const verdict = ev.problem ? `<div class="verdict bad">${icon('lock')}${esc(ev.problem)}</div>`
+    : `<div class="verdict ${ev.accept ? 'good' : 'bad'}">${ev.accept ? `${icon('check')}${esc(X.short)} will accept` : `${esc(X.short)} will refuse`}<span class="score">${ev.score > 0 ? '+' : ''}${ev.score}</span></div>`;
+  const m = root.querySelector('.modal');
+  const keep = m.querySelector('.dialog')?.scrollTop ?? 0;
+  const again = !!m.querySelector('.deal');
+  openModal(`<div class="deal">
+    <div class="eyebrow">The negotiation table · Turn ${s.turn}</div>
+    <div class="deal-head">
+      <div class="side-h">${portrait(s.characters[f.rulerId], f.color, { role: 'ruler', cls: 'portrait sm' })}<div><b>${esc(f.short)}</b><small class="muted">${icon('gold')}${f.gold}</small></div></div>
+      <div class="vs">${icon('handshake')}</div>
+      <div class="side-h r"><div><b>${esc(X.short)}</b><small class="muted">${icon('gold')}${X.gold}</small></div>${portrait(s.characters[X.rulerId], X.color, { role: 'ruler', cls: 'portrait sm' })}</div>
+    </div>
+    <h4>Terms</h4>
+    <div class="treaties">${treatyRow}</div>
+    <div class="deal-cols">
+      <div class="col"><h4>You give</h4>${stepper('give', f.gold)}<div class="chips">${towns(P, d.giveTowns, 'giveTown')}</div><div class="chips">${techs(P, d.with, d.giveTechs, 'giveTech')}</div></div>
+      <div class="col"><h4>You ask for</h4>${stepper('ask', X.gold)}<div class="chips">${towns(d.with, d.askTowns, 'askTown')}</div><div class="chips">${techs(d.with, P, d.askTechs, 'askTech')}</div></div>
+    </div>
+    ${verdict}
+    ${items.length ? `<details class="whybox" open><summary>How ${esc(X.short)} weighs it</summary>${reasons(ev.parts)}</details>` : ''}
+    <div class="actions"><button class="primary" data-dsend ${ev.accept ? '' : 'disabled'}>Propose</button><button class="ghost" data-dclear>Clear</button><button class="ghost" data-close>Leave the table</button></div>
+  </div>`);
+  const dialog = m.querySelector('.dialog');
+  dialog.classList.add('wide');
+  if (again) dialog.style.animation = 'none';
+  dialog.scrollTop = keep;
+  dialog.addEventListener('click', onDealClick);
+}
+
+function onDealClick(e) {
+  const d = ui.deal;
+  const s = ui.s;
+  const b = e.target.closest('button');
+  if (!b || b.disabled || !d) return;
+  const toggle = (list, v) => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); else list.push(v); };
+  if (b.dataset.dgold) {
+    const key = b.dataset.dgold === 'give' ? 'giveGold' : 'askGold';
+    const have = b.dataset.dgold === 'give' ? me().gold : s.factions[d.with].gold;
+    d[key] = Math.max(0, Math.min(have, d[key] + +b.dataset.dn));
+  } else if (b.dataset.dg) {
+    const v = b.dataset.dv;
+    const g = b.dataset.dg;
+    if (g === 'giveTown') toggle(d.giveTowns, +v);
+    else if (g === 'askTown') toggle(d.askTowns, +v);
+    else if (g === 'giveTech') toggle(d.giveTechs, v);
+    else if (g === 'askTech') toggle(d.askTechs, v);
+    else if (g === 'treaty') toggle(d.treaties, v);
+  } else if (b.hasAttribute('data-dclear')) {
+    ui.deal = null;
+    return showDeal(d.with);
+  } else if (b.hasAttribute('data-dsend')) {
+    const res = proposeDeal(s, s.playerId, d.with, dealItems());
+    if (typeof res === 'string') { toast(res); sfx.bad(); return; }
+    sfx.coin();
+    ui.deal = null;
+    ui.undo = null;
+    closeModal();
+    toast(`${s.factions[res.with].short} agrees`);
+    autosave();
+    if (s.winner) return showEnd();
+    render();
+    if (s.pendingEvents.length) showEvent();
+    return;
+  } else return;
+  renderDeal();
 }
 
 function paneResearch() {
@@ -577,11 +798,22 @@ function showPreview(att, def, e) {
     ${noHover ? '<div class="small gold">Tap again to attack</div>' : ''}</div>`, e);
 }
 
+function peaceWords(fid) {
+  const s = ui.s;
+  const P = s.playerId;
+  const r = relation(s, P, fid);
+  if (s.factions[fid].overlord === P) return 'Your vassal: your armies may pass';
+  if (s.factions[P].overlord === fid) return 'Your liege';
+  if (r.alliance) return 'Your ally: your armies may pass';
+  if (r.pact > s.turn) return `At peace, with a pact until turn ${r.pact}`;
+  return 'At peace with you';
+}
+
 function showTownTip(c, e) {
   const s = ui.s;
   const owner = c.owner < 0 ? null : s.factions[c.owner];
   const g = unitAt(s, c.tile);
-  const status = c.owner === s.playerId ? 'Your town' : !owner ? 'Free town: walk in to claim it' : hostile(s, s.playerId, c.owner) ? 'At war: take it when it is empty' : 'At peace with you';
+  const status = c.owner === s.playerId ? 'Your town' : !owner ? 'Free town: walk in to claim it' : hostile(s, s.playerId, c.owner) ? 'At war: take it when it is empty' : peaceWords(c.owner);
   tipAt(`<div class="pv town-tip"><div class="pv-h">${owner ? crest(owner.key, owner.color, 'crest sm') : ''}${esc(c.name)}${c.capital ? ' <span class="tag">Capital</span>' : ''}</div>
     <div class="small">${owner ? esc(owner.name) : 'Rebels'} · Level ${c.level}${c.buildings.length ? ` · ${c.buildings.map((b) => BUILDINGS[b].name).join(', ')}` : ''}</div>
     <div class="small">${g ? `Garrison: ${UNITS[g.type].name} (${g.hp} HP)` : 'No garrison'}</div>
@@ -699,8 +931,11 @@ async function onClick(e) {
     case 'trade': r(trade(s, fid, b.dataset.g, +b.dataset.n, b.dataset.side), () => sfx.coin()); break;
     case 'askwar': ui.confirmWar = +b.dataset.v; render(); break;
     case 'nowar': ui.confirmWar = null; render(); break;
-    case 'war': ui.confirmWar = null; r(declareWar(s, fid, +b.dataset.v), () => sfx.bad()); break;
+    case 'war': ui.confirmWar = null; r(declareWar(s, fid, +b.dataset.v), () => sfx.bad()); if (s.pendingEvents.length) showEvent(); break;
     case 'peace': r(offerPeace(s, fid, +b.dataset.v, +b.dataset.gold), () => sfx.event()); break;
+    case 'deal': showDeal(+b.dataset.v); break;
+    case 'gift': r(sendGift(s, fid, +b.dataset.v, GIFT_GOLD), () => sfx.coin()); break;
+    case 'release': r(releaseVassal(s, fid, +b.dataset.v), () => sfx.event()); break;
     case 'zoomin': ui.board.zoomIn(); break;
     case 'zoomout': ui.board.zoomOut(); break;
     case 'zoomfit': ui.board.resetView(); break;
@@ -811,6 +1046,7 @@ async function animateAI(res, speed) {
 }
 
 function afterPlayerTurnStarts() {
+  pruneEvents(ui.s);
   render();
   if (ui.s.pendingEvents.length) showEvent();
   else nextUnitIfAny();
@@ -845,17 +1081,20 @@ function openModal(html, { closable = true } = {}) {
 }
 function closeModal() {
   const m = root.querySelector('.modal');
+  const stay = !!m.querySelector('.deal'); // leaving the negotiation table keeps you on the Diplomacy tab
   m.classList.remove('on');
   m.innerHTML = '';
-  if (ui.s && !ui.s.winner && myTurn()) nextUnitIfAny();
+  if (ui.s && !ui.s.winner && myTurn() && !stay) nextUnitIfAny();
 }
 
 function showEvent() {
   const s = ui.s;
+  pruneEvents(s);
   const ev = s.pendingEvents[0];
+  if (!ev) { render(); return nextUnitIfAny(); }
   const v = eventView(s, ev);
   sfx.event();
-  openModal(`<div class="eyebrow">Turn ${s.turn} · ${esc(me().name)}</div>${vignette(ev.id)}<h2>${esc(v.title)}</h2><p>${esc(v.text)}</p>
+  openModal(`<div class="eyebrow">Turn ${s.turn} · ${esc(me().name)}</div>${vignette(v.scene)}<h2>${esc(v.title)}</h2><p>${esc(v.text)}</p>
     <div class="options">${v.options.map((o, i) => `<button class="option" data-opt="${i}" ${o.ok ? '' : 'disabled'}><b>${esc(o.label)}</b><small>${esc(o.hint)}</small></button>`).join('')}</div>`, { closable: false });
   root.querySelector('.modal').querySelectorAll('[data-opt]').forEach((b) => b.addEventListener('click', () => {
     const err = resolveEvent(s, +b.dataset.opt);
@@ -878,6 +1117,7 @@ function showHelp(first) {
       <div><b>${icon('attack')}Units</b><p>Click a unit: lit hexes are where it can go, red rings are enemies it can hit. <b>Hover an enemy for the exact outcome</b>: every fight is predictable. Forests and hills end your move but defend well. Moving next to an enemy stops you (zone of control).</p></div>
       <div><b>${icon('castle')}Towns</b><p>Click your town to recruit (one unit per turn, two with Barracks), grow it, and add buildings. Each soldier eats 1 grain per turn. Run out and your army starves.</p></div>
       <div><b>${icon('lore')}Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
+      <div><b>${icon('handshake')}Diplomacy</b><p>Every house has an opinion of you, and you can see each reason behind it. At the negotiation table, trade gold, towns and techs, or sign pacts, trade agreements, alliances and royal marriages. Crush a rival and it may swear fealty. Break an oath and every court remembers.</p></div>
       <div><b>${icon('scales')}Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
       <div><b>${icon('renown')}Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
       <div><b>${icon('danger')}Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
@@ -917,7 +1157,7 @@ function showEnd() {
   const w = s.factions[s.winner.id];
   const won = w.id === s.playerId;
   (won ? sfx.win : sfx.lose)();
-  const why = { renown: `reached ${RENOWN_TO_WIN} renown`, conquest: 'conquered every rival', time: `had the most renown when the age ended`, eliminated: 'outlasted you' }[s.winner.reason];
+  const why = { renown: `reached ${RENOWN_TO_WIN} renown`, conquest: 'conquered or subjugated every rival', time: `had the most renown when the age ended`, eliminated: 'outlasted you' }[s.winner.reason];
   const f = me();
   const src = Object.entries(f.stats.renown).filter(([, v]) => v > 0);
   const maxSrc = Math.max(1, ...src.map(([, v]) => v));
@@ -947,7 +1187,7 @@ function report(entries) {
   const s = ui.s;
   const me_ = me();
   const mine = entries.filter((l) => l.kind === 'bad' || l.kind === 'good' || l.text.includes(me_.short) || l.text.includes(me_.name));
-  const big = entries.filter((l) => !mine.includes(l) && /declares war|destroyed|falls in battle|cathedral|make peace/.test(l.text));
+  const big = entries.filter((l) => !mine.includes(l) && /declares war|destroyed|falls in battle|cathedral|make peace|bends the knee|breaks its|independence|an alliance/.test(l.text));
   const items = [...mine, ...big].slice(-5);
   if (!items.length) return;
   if (items.some((l) => l.kind === 'bad')) sfx.bad();
@@ -982,7 +1222,7 @@ function loadSave() {
     for (const f of s?.factions ?? []) {
       f.lore ??= 0; f.techs ??= []; f.policies ??= []; f.research ??= null;
     }
-    return s;
+    return s ? ensureDiplomacy(s) : s;
   } catch { return null; }
 }
 

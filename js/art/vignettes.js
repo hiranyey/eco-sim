@@ -112,6 +112,21 @@ const SCENES = {
     + `<circle cx="110" cy="68" r="14" fill="none" stroke="${INK}" stroke-width="5"/><circle cx="110" cy="68" r="14" fill="none" stroke="#f0c850" stroke-width="3"/>`
     + `<circle cx="130" cy="68" r="14" fill="none" stroke="${INK}" stroke-width="5"/><circle cx="130" cy="68" r="14" fill="none" stroke="#f0c850" stroke-width="3"/>`
     + `<path d="M118.5,55.6 A14,14 0 0 1 121.5,80" fill="none" stroke="#f0c850" stroke-width="3"/>` + ground(90),
+  envoy: () => sun(40, 24, 9) + hills(70)
+    + sh('M168,88V46h9v-8h8v8h9v-8h8v8h9v-8h8v8h9V88z', WASH, 1.2) + sh('M190,88v-16a9,9 0 0 1 18,0v16z', INK, 1) + hatch(168, 46, 238, 88, 6, 0.5)
+    + ground(90) + ln('M62,90V34', 1.8) + sh('M62,34q14,-4 28,2q-6,6 0,12q-14,-6 -28,-2z', '#3a7d4a', 1)
+    + figure(104, 90, true, true) + sh('M112,58h36v22h-36z', PAPER, 1.2) + ln('M116,64h28M116,69h24M116,74h18', 0.8)
+    + `<circle cx="146" cy="80" r="5" fill="#c0392b" stroke="${INK}" stroke-width="1"/>` + ln('M144,85l-2,6M148,85l2,6', 1),
+  demand: () => moon(200, 24, 10) + hills(70) + ground(90)
+    + sh('M117,46h6v40l-3,7-3,-7z', '#ece6d6', 1.1) + ln('M120,50v34', 0.6) + sh('M102,41h36v5h-36z', '#c9a660', 1.1)
+    + sh('M117,24h6v17h-6z', '#5a3a22', 1) + `<circle cx="120" cy="21" r="4.2" fill="#c9a660" stroke="${INK}" stroke-width="1"/>`
+    + [[90, 92], [102, 89], [114, 93], [128, 90], [140, 92], [152, 89], [98, 84], [126, 84], [140, 84], [110, 80], [133, 78]]
+      .map(([x, y]) => `<ellipse cx="${x}" cy="${y}" rx="8" ry="3.4" fill="#e8c860" stroke="${INK}" stroke-width="1"/>`).join(''),
+  call_to_arms: () => sun(120, 24, 9) + hills(70) + ground(90)
+    + ln('M66,90L96,28', 2) + sh('M96,28l-32,2 6,10 -9,9 31,-3z', '#c0392b', 1.1)
+    + ln('M174,90L144,28', 2) + sh('M144,28l32,2 -6,10 9,9 -31,-3z', '#2f6fc0', 1.1)
+    + sh('M92,72Q120,86 148,60l7,6Q126,98 90,80z', WASH, 1.2) + sh('M148,60l12,-8 4,18 -9,-4z', '#c9a660', 1.1)
+    + ln('M104,78q4,-3 8,0M118,80q4,-3 8,-1', 0.8) + ln('M166,54l10,-6M168,62l12,0M166,70l10,6', 1),
   peace_offer: () => sun(196, 24, 9) + hills(72) + ln('M40,90V30', 2) + sh('M40,30q20,-6 40,2q-8,8 0,16q-20,-8 -40,-2z', PAPER, 1.1) + ground(88)
     + sh('M110,56q20,-24 46,-18q-10,4 -14,12q18,-2 30,6q-24,6 -40,2q-10,8 -24,6q6,-4 2,-8z', PAPER, 1.2)
     + `<circle cx="154" cy="42" r="1.4" fill="${INK}"/>` + sh('M158,40l8,1-8,3z', '#e8b04a', 0.8)

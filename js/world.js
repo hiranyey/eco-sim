@@ -84,7 +84,7 @@ function placeName(s, used) {
   return n;
 }
 
-export function newCharacter(s, age) {
+export function newCharacter(s, age, sexWanted = null) {
   const keys = Object.keys(TRAITS);
   const traits = [];
   while (traits.length < 2) {
@@ -93,7 +93,8 @@ export function newCharacter(s, age) {
     if ((t === 'robust' && traits.includes('frail')) || (t === 'frail' && traits.includes('robust'))) continue;
     traits.push(t);
   }
-  const sex = rand(s) < 0.5 ? 'f' : 'm';
+  const roll = rand(s) < 0.5 ? 'f' : 'm';
+  const sex = sexWanted ?? roll;
   // Avoid two living characters sharing a name.
   const taken = new Set(Object.values(s.characters).filter((c) => c.alive).map((c) => c.name));
   let name = pick(s, NAMES[sex]);
@@ -128,7 +129,7 @@ export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'no
     version: 1, seed: String(seed), rng: seedNum, turn: 1, current: 0, playerId: playerFaction, difficulty,
     W, H, tiles: [], cities: [], units: [], factions: [], characters: {}, relations: {},
     market: Object.fromEntries(Object.entries(GOODS).map(([k, g]) => [k, g.base])),
-    log: [], pendingEvents: [], winner: null, nextId: 1, order: [],
+    log: [], pendingEvents: [], winner: null, nextId: 1, order: [], memory: {},
   };
 
   let capitals = null;
@@ -165,7 +166,7 @@ export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'no
     s.factions.push({
       id: i, key: F.key, name: F.name, short: F.short, color: F.color, alive: true, ai: i !== playerFaction,
       gold: 10, grain: 10, timber: 4, iron: 2, lore: 0, techs: [], research: null, policies: [], renown: 0, rulerId: ruler, heirId: heir,
-      stats: { kills: 0, captures: 0, lost: 0, built: 0, renown: {} }, eliminatedTurn: null,
+      stats: { kills: 0, captures: 0, lost: 0, built: 0, renown: {} }, eliminatedTurn: null, overlord: null,
     });
     s.cities.push({ id: i, name: placeName(s, usedNames), tile: capitals[i], owner: i, level: 1, buildings: [], capital: true, recruits: 0 });
   });
@@ -213,7 +214,7 @@ export function newGame({ seed = Date.now(), playerFaction = 0, difficulty = 'no
     const far = Math.min(...capitals.map((k) => distance(W, k, c.tile)));
     if (rand(s) < 0.75) addUnit(s, far >= 5 && rand(s) < 0.5 ? 'spear' : 'militia', -1, c.tile);
   }
-  for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) s.relations[`${a}-${b}`] = { war: false, truce: 0, since: 0 };
+  for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) s.relations[`${a}-${b}`] = { war: false, truce: 0, since: 0, pact: 0, alliance: false, trade: false };
   s.order = [playerFaction, ...[0, 1, 2, 3].filter((i) => i !== playerFaction)];
   s.log.push({ turn: 1, text: 'Four houses stake their claims on the Marches. Take towns, hold the shrines, and win renown.', kind: 'info' });
   return s;

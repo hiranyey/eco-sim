@@ -4,6 +4,9 @@ export const W = 14;
 export const H = 10;
 export const RENOWN_TO_WIN = 75;
 export const TURN_LIMIT = 60;
+export const TRUCE_TURNS = 8;
+export const PACT_TURNS = 12;
+export const GIFT_GOLD = 10;
 
 export const GOODS = {
   grain: { name: 'Grain', icon: '🌾', base: 3 },

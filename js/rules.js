@@ -3,10 +3,13 @@ import { rand, randInt } from './rng.js';
 import { neighbors, distance, within } from './hex.js';
 import {
   W, H, TERRAIN, UNITS, CITY_LEVELS, UPGRADE_COST, BUILDINGS, GOODS, RENOWN_TO_WIN, TURN_LIMIT, DIFFICULTY,
-  TECHS, POLICIES, POLICY_COST,
+  TECHS, POLICIES, POLICY_COST, TRUCE_TURNS,
 } from './data.js';
 import { addUnit, maxHp, newCharacter, titled, sexOf } from './world.js';
 import { rollEvent } from './events.js';
+import {
+  friendly, breakOath, rallyAllies, vassalsOf, tradeGold, diplomacyRound, remember,
+} from './diplomacy.js';
 
 // ---------- lookups ----------
 export const unitAt = (s, tile) => s.units.find((u) => u.tile === tile) ?? null;
@@ -21,7 +24,8 @@ export const currentFaction = (s) => s.order[s.current];
 export const territoryOwner = (s, tile) => (s.tiles[tile].city >= 0 ? s.cities[s.tiles[tile].city].owner : null);
 export const hasTech = (s, fid, t) => fid >= 0 && !!s.factions[fid].techs?.includes(t);
 export const hasPolicy = (s, fid, p) => fid >= 0 && !!s.factions[fid].policies?.includes(p);
-export const relation = (s, a, b) => s.relations[a < b ? `${a}-${b}` : `${b}-${a}`];
+const SELF = Object.freeze({ war: false, truce: 0, since: 0, pact: 0, alliance: false, trade: false });
+export const relation = (s, a, b) => (a === b ? SELF : s.relations[a < b ? `${a}-${b}` : `${b}-${a}`]);
 
 export function addRenown(s, fid, n, src) {
   const f = s.factions[fid];
@@ -55,7 +59,7 @@ export function movePoints(s, u) {
 
 function blockedByPeace(s, u, tile) {
   const o = territoryOwner(s, tile);
-  return o != null && o >= 0 && o !== u.owner && !hostile(s, u.owner, o);
+  return o != null && o >= 0 && o !== u.owner && !hostile(s, u.owner, o) && !friendly(s, u.owner, o);
 }
 
 export function inZoc(s, owner, tile) {
@@ -290,9 +294,14 @@ function checkElimination(s, fid) {
   s.units = s.units.filter((u) => u.owner !== fid);
   for (const k of Object.keys(s.relations)) {
     const [a, b] = k.split('-').map(Number);
-    if (a === fid || b === fid) s.relations[k].war = false;
+    if (a === fid || b === fid) Object.assign(s.relations[k], { war: false, alliance: false, trade: false, pact: 0 });
   }
+  f.overlord = null;
   log(s, `💀 ${f.name} has been destroyed.`, fid === s.playerId ? 'bad' : 'war');
+  for (const v of vassalsOf(s, fid)) {
+    s.factions[v].overlord = null;
+    log(s, `${s.factions[v].short} is freed from its oaths.`, 'info');
+  }
   checkVictory(s);
 }
 
@@ -474,12 +483,23 @@ export function income(s, fid) {
   if (pol('bastions')) out.gold -= cs.length;
   if (pol('pilgrimage')) out.gold -= 2;
   out.lore = Math.max(0, out.lore);
+  // Diplomacy: trade routes, and the tribute that flows from vassal to liege.
+  out.trade = 0;
+  for (const o of s.factions) if (o.alive && o.id !== fid && relation(s, fid, o.id).trade) out.trade += tradeGold(s, fid, o.id);
+  out.gold += out.trade;
+  out.tribute = 0;
+  if (f.overlord != null) {
+    out.tribute = -Math.max(1, Math.floor(Math.max(0, out.gold) / 4));
+  } else {
+    for (const v of vassalsOf(s, fid)) out.tribute -= income(s, v).tribute;
+  }
+  out.gold += out.tribute;
   return out;
 }
 
 // Renown earned at the start of each turn: { shrines, building }.
 export function renownSources(s, fid) {
-  const out = { shrines: 0, building: 0 };
+  const out = { shrines: 0, building: 0, vassals: vassalsOf(s, fid).length };
   const per = (hasTrait(s, fid, 'pious') ? 2 : 1) + (hasTech(s, fid, 'divine') ? 1 : 0) + (hasPolicy(s, fid, 'pilgrimage') ? 1 : 0);
   for (const u of unitsOf(s, fid)) if (s.tiles[u.tile].shrine) out.shrines += per;
   for (const c of citiesOf(s, fid)) if (c.buildings.includes('cathedral')) out.building += 1 + (hasPolicy(s, fid, 'pilgrimage') ? 1 : 0);
@@ -487,7 +507,7 @@ export function renownSources(s, fid) {
 }
 export function renownIncome(s, fid) {
   const r = renownSources(s, fid);
-  return r.shrines + r.building;
+  return r.shrines + r.building + r.vassals;
 }
 
 // ---------- research & policies ----------
@@ -595,35 +615,60 @@ export function strength(s, fid) {
   return v;
 }
 
-export function declareWar(s, a, b) {
+// opts.called: drawn in by a liege or ally (no renown cost, no further calls).
+// opts.quiet: the caller writes its own log line.
+export function declareWar(s, a, b, opts = {}) {
   const r = relation(s, a, b);
   if (!s.factions[b].alive) return 'That house is gone';
   if (r.war) return 'Already at war';
   if (r.truce > s.turn) return `A truce holds until turn ${r.truce}`;
+  if (!opts.called && s.factions[a].overlord != null) return 'A vassal cannot declare war on its own';
+  if (!opts.called && s.factions[b].overlord === a) return 'They are your sworn vassal: release them first';
+  breakOath(s, a, b);
   r.war = true;
   r.since = s.turn;
-  addRenown(s, a, -Math.min(2, s.factions[a].renown), 'events');
-  log(s, `⚔ ${s.factions[a].name} declares war on ${s.factions[b].name}!`, a === s.playerId || b === s.playerId ? 'bad' : 'war');
+  r.aggressor = a;
+  r.trade = false;
+  r.alliance = false;
+  r.pact = 0;
+  withdraw(s, a, b);
+  remember(s, b, a, 'Declared war on us', -20, { decay: 0.5, cap: 40 });
+  const mine = a === s.playerId || b === s.playerId;
+  if (!opts.called) addRenown(s, a, -Math.min(2, s.factions[a].renown), 'events');
+  if (!opts.quiet) log(s, `⚔ ${s.factions[a].name} declares war on ${s.factions[b].name}!`, mine ? 'bad' : 'war');
+  if (!opts.called) rallyAllies(s, a, b);
   return { type: 'war' };
 }
 
 export function makePeace(s, a, b) {
   const r = relation(s, a, b);
   r.war = false;
-  r.truce = s.turn + 8;
-  // Armies standing in the other's land go home.
+  r.truce = s.turn + TRUCE_TURNS;
+  withdraw(s, a, b);
+  log(s, `🕊 ${s.factions[a].short} and ${s.factions[b].short} make peace. Truce until turn ${r.truce}.`, a === s.playerId || b === s.playerId ? 'good' : 'world');
+  // Vassals lay down arms with their liege.
+  for (const [x, y] of [[a, b], [b, a]]) {
+    for (const v of vassalsOf(s, x)) {
+      const rv = relation(s, v, y);
+      if (v !== y && rv.war) { rv.war = false; rv.truce = s.turn + TRUCE_TURNS; withdraw(s, v, y); }
+    }
+  }
+  return { type: 'peace' };
+}
+
+// Armies standing in the other's land (where they are no longer welcome) go home.
+export function withdraw(s, a, b) {
   for (const u of s.units) {
     if (u.owner !== a && u.owner !== b) continue;
     const o = territoryOwner(s, u.tile);
     if (o == null || o === u.owner || (o !== a && o !== b)) continue;
+    if (hostile(s, u.owner, o) || friendly(s, u.owner, o)) continue;
     const home = nearestFree(s, u);
     if (home != null) u.tile = home;
   }
-  log(s, `🕊 ${s.factions[a].short} and ${s.factions[b].short} make peace. Truce until turn ${r.truce}.`, a === s.playerId || b === s.playerId ? 'good' : 'world');
-  return { type: 'peace' };
 }
 
-function nearestFree(s, u) {
+export function nearestFree(s, u) {
   for (let rad = 1; rad <= 6; rad++) {
     for (const t of within(W, H, u.tile, rad)) {
       if (!TERRAIN[s.tiles[t].t].pass || unitAt(s, t)) continue;
@@ -682,6 +727,7 @@ export function beginTurn(s, fid) {
   const rn = renownSources(s, fid);
   if (rn.shrines) addRenown(s, fid, rn.shrines, 'shrines');
   if (rn.building) addRenown(s, fid, rn.building, 'building');
+  if (rn.vassals) addRenown(s, fid, rn.vassals, 'vassals');
   rollEvent(s, fid);
   checkVictory(s);
 }
@@ -701,6 +747,7 @@ function heal(s, fid) {
 
 function newRound(s) {
   s.turn++;
+  diplomacyRound(s);
   for (const g of Object.keys(GOODS)) s.market[g] += (GOODS[g].base - s.market[g]) * 0.15;
   s.priceHistory ??= {};
   for (const g of Object.keys(GOODS)) {
@@ -750,7 +797,7 @@ export function checkVictory(s) {
   const alive = s.factions.filter((f) => f.alive);
   const top = alive.find((f) => f.renown >= RENOWN_TO_WIN);
   if (top) s.winner = { id: top.id, reason: 'renown' };
-  else if (alive.length === 1) s.winner = { id: alive[0].id, reason: 'conquest' };
+  else if (alive.filter((f) => f.overlord == null).length === 1) s.winner = { id: alive.find((f) => f.overlord == null).id, reason: 'conquest' };
   else if (!s.factions[s.playerId].alive) s.winner = { id: [...alive].sort((a, b) => b.renown - a.renown)[0].id, reason: 'eliminated' };
 }
 

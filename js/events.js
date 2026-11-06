@@ -1,7 +1,8 @@
 // Court events. The player chooses from a card; AI houses decide on their own.
 import { rand, pick, randInt } from './rng.js';
 import { within } from './hex.js';
-import { makePeace, addRenown } from './rules.js';
+import { makePeace, addRenown, declareWar, log } from './rules.js';
+import { marry, applyDeal, remember, allied, endAlliance, tradeGold } from './diplomacy.js';
 import { W, H, TERRAIN, TRAITS } from './data.js';
 import { addUnit, maxHp, titled, pronoun } from './world.js';
 
@@ -160,14 +161,13 @@ export const EVENTS = {
     title: 'A Marriage Proposal', weight: 5,
     find: (s, fid) => {
       const ok = s.factions.filter((f) => f.alive && f.id !== fid && !rel(s, fid, f.id).war);
-      return ok.length && heirOf(s, fid) ? { with: pick(s, ok).id } : null;
+      const h = heirOf(s, fid);
+      return ok.length && h && !h.spouseId ? { with: pick(s, ok).id } : null;
     },
     text: (s, fid, c) => `${s.factions[c.with].name} proposes to wed one of its own to ${heirOf(s, fid) ? titled(heirOf(s, fid), 'heir') : 'your heir'}, sealing a long friendship.`,
     options: [
-      { label: 'Accept the match', hint: '+2 renown; neither house can declare war on the other for 10 turns', fx: (s, fid, c) => {
-        addRenown(s, fid, 2, 'events');
-        const r = rel(s, fid, c.with);
-        r.truce = Math.max(r.truce, s.turn + 10);
+      { label: 'Accept the match', hint: '+2 renown, a lasting bond with their court and a 12-turn non-aggression pact', fx: (s, fid, c) => {
+        if (s.factions[c.with].alive && !rel(s, fid, c.with).war) marry(s, fid, c.with);
       } },
       { label: 'Refuse', hint: 'Keep your options open', fx: () => {} },
     ],
@@ -185,6 +185,72 @@ export const EVENTS = {
         makePeace(s, fid, c.from);
       } },
       { label: 'Fight on', hint: 'They will not ask again soon', fx: () => {} },
+    ],
+  },
+  // ---------- special: envoys and calls to arms (player only) ----------
+  envoy_pact: {
+    title: 'Envoys Seek a Pact', special: true, scene: 'envoy',
+    valid: (s, fid, c) => s.factions[c.from].alive && !rel(s, fid, c.from).war && rel(s, fid, c.from).pact <= s.turn,
+    text: (s, fid, c) => `Envoys of ${s.factions[c.from].name} propose a non-aggression pact: for twelve years neither house would march on the other.`,
+    options: [
+      { label: 'Seal the pact', hint: 'Breaking it later costs renown and every court\'s trust', fx: (s, fid, c) => applyDeal(s, fid, c.from, [{ k: 'pact' }]) },
+      { label: 'Send them home', hint: 'They will feel slighted', fx: (s, fid, c) => remember(s, c.from, fid, 'Rebuffed our envoys', -8, { decay: 1 }) },
+    ],
+  },
+  envoy_trade: {
+    title: 'Merchants Bearing Letters', special: true, scene: 'envoy',
+    valid: (s, fid, c) => s.factions[c.from].alive && !rel(s, fid, c.from).war && !rel(s, fid, c.from).trade,
+    text: (s, fid, c) => `The merchants of ${s.factions[c.from].name} want open roads and fair tolls between your realms.`,
+    options: [
+      { label: 'Open the roads', hint: (c, s) => `Trade agreement: +${tradeGold(s, s.playerId, c.from)} gold a turn for you, and they profit too`, fx: (s, fid, c) => applyDeal(s, fid, c.from, [{ k: 'trade' }]) },
+      { label: 'Keep the gates shut', hint: 'They will feel slighted', fx: (s, fid, c) => remember(s, c.from, fid, 'Rebuffed our envoys', -5, { decay: 1 }) },
+    ],
+  },
+  envoy_alliance: {
+    title: 'An Offer of Alliance', special: true, scene: 'envoy',
+    valid: (s, fid, c) => s.factions[c.from].alive && !rel(s, fid, c.from).war && !rel(s, fid, c.from).alliance,
+    text: (s, fid, c) => `${s.factions[c.from].name} proposes an alliance${c.against != null ? ` against ${s.factions[c.against].name}` : ''}. Each house would come to the other's defence.`,
+    options: [
+      { label: 'Join hands', hint: 'Allies defend each other and may cross each other\'s land. Refusing a later call to arms ends it.', fx: (s, fid, c) => applyDeal(s, fid, c.from, [{ k: 'alliance' }]) },
+      { label: 'Decline', hint: 'They will be disappointed', fx: (s, fid, c) => remember(s, c.from, fid, 'Spurned our friendship', -10, { decay: 1 }) },
+    ],
+  },
+  envoy_demand: {
+    title: 'A Demand for Tribute', special: true, scene: 'demand',
+    valid: (s, fid, c) => s.factions[c.from].alive && !rel(s, fid, c.from).war,
+    text: (s, fid, c) => `The envoy of ${s.factions[c.from].name} does not bow. "Pay ${c.gold} gold, or our armies will collect it themselves."`,
+    options: [
+      { label: 'Pay the tribute', hint: (c) => `−${c.gold} gold; they leave you be for 6 turns`, can: (s, fid, c) => fac(s, fid).gold >= (c?.gold ?? 0), fx: (s, fid, c) => {
+        fac(s, fid).gold -= c.gold;
+        fac(s, c.from).gold += c.gold;
+        const r = rel(s, fid, c.from);
+        r.truce = Math.max(r.truce, s.turn + 6);
+        remember(s, c.from, fid, 'Paid us tribute', 10, { decay: 1 });
+        addRenown(s, fid, -Math.min(1, fac(s, fid).renown), 'events');
+        log(s, `💰 ${fac(s, fid).short} pays ${c.gold} gold in tribute to ${fac(s, c.from).short}.`, 'bad');
+      } },
+      { label: 'Refuse', hint: 'They will declare war', fx: (s, fid, c) => { declareWar(s, c.from, fid); } },
+    ],
+  },
+  call_to_arms: {
+    title: 'A Call to Arms', special: true, scene: 'call_to_arms',
+    valid: (s, fid, c) => s.factions[c.ally].alive && s.factions[c.enemy].alive && rel(s, c.ally, c.enemy).war && !rel(s, fid, c.enemy).war && allied(s, fid, c.ally),
+    text: (s, fid, c) => `${s.factions[c.ally].name} ${c.defensive ? 'has been attacked by' : 'marches against'} ${s.factions[c.enemy].name} and calls on you, as its ally, to take the field.`,
+    options: [
+      { label: 'Honour the alliance', hint: (c, s) => {
+        const r = rel(s, s.playerId, c.enemy);
+        return `War with ${s.factions[c.enemy].short}, at no renown cost${r.truce > s.turn ? '. You have a truce with them, so you cannot' : r.pact > s.turn ? '. This breaks your pact with them' : ''}`;
+      }, can: (s, fid, c) => !c || rel(s, fid, c.enemy).truce <= s.turn, fx: (s, fid, c) => {
+        declareWar(s, fid, c.enemy, { called: true, quiet: true });
+        log(s, `📯 ${fac(s, fid).short} answers ${fac(s, c.ally).short}'s call to arms against ${fac(s, c.enemy).short}!`, 'war');
+        remember(s, c.ally, fid, 'Stood by us in war', 20, { decay: 0.5, cap: 30 });
+      } },
+      { label: 'Stay out of it', hint: (c) => (c.defensive ? 'The alliance ends, −3 renown, and they will not forget' : 'They will be disappointed'), fx: (s, fid, c) => {
+        if (!c.defensive) { remember(s, c.ally, fid, 'Ignored our call', -10, { decay: 1 }); return; }
+        addRenown(s, fid, -Math.min(3, fac(s, fid).renown), 'events');
+        remember(s, c.ally, fid, 'Abandoned us in war', -35, { decay: 0.5 });
+        endAlliance(s, fid, c.ally, `${fac(s, fid).short} abandons ${fac(s, c.ally).short} in its hour of need. The alliance is over.`);
+      } },
     ],
   },
 };
@@ -210,7 +276,7 @@ export function trigger(s, fid, id, ctx) {
     s.pendingEvents.push({ id, fid, ctx });
     return;
   }
-  const opts = e.options.filter((o) => !o.can || o.can(s, fid));
+  const opts = e.options.filter((o) => !o.can || o.can(s, fid, ctx));
   const choice = id === 'peace_offer' ? e.options[1] : opts[randInt(s, 0, opts.length - 1)];
   choice.fx(s, fid, ctx);
 }
@@ -220,8 +286,14 @@ export function eventView(s, ev) {
   return {
     title: e.title,
     text: e.text(s, ev.fid, ev.ctx),
-    options: e.options.map((o) => ({ label: o.label, hint: typeof o.hint === 'function' ? o.hint(ev.ctx) : o.hint, ok: !o.can || o.can(s, ev.fid) })),
+    scene: e.scene ?? ev.id,
+    options: e.options.map((o) => ({ label: o.label, hint: typeof o.hint === 'function' ? o.hint(ev.ctx, s) : o.hint, ok: !o.can || o.can(s, ev.fid, ev.ctx) })),
   };
+}
+
+// Drop queued events that no longer make sense (an ally's war already over, an envoy's house destroyed).
+export function pruneEvents(s) {
+  s.pendingEvents = s.pendingEvents.filter((ev) => !EVENTS[ev.id].valid || EVENTS[ev.id].valid(s, ev.fid, ev.ctx));
 }
 
 export function resolveEvent(s, index) {
@@ -230,7 +302,7 @@ export function resolveEvent(s, index) {
   const e = EVENTS[ev.id];
   if (e.valid && !e.valid(s, ev.fid, ev.ctx)) return null;
   const o = e.options[index];
-  if (!o || (o.can && !o.can(s, ev.fid))) {
+  if (!o || (o.can && !o.can(s, ev.fid, ev.ctx))) {
     s.pendingEvents.unshift(ev);
     return 'You cannot afford that';
   }

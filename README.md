@@ -35,7 +35,19 @@ HTTP, not opened from disk.
 - **The economy is lean.** Towns produce gold, and the hexes around them produce grain, timber and iron. Every soldier eats grain each turn. Buy and sell on a market whose prices move with every house's trades.
 - **Research and policies.** Towns produce lore (📜): 1 per town level, +1 at the capital, +2 with a Library. Spend it on three ladders of four techs each: **Warfare** (Drill Yards, Longbows, Stirrups, Trebuchets), **Economy** (Crop Rotation, Coinage, Guilds, Architecture) and **Statecraft** (Code of Laws, Primogeniture, Bureaucracy, Divine Right). A game is long enough for only about half of them. Techs unlock **policies** such as Tithes, Conscription, Warrior Code, Free Trade and Bastion Towns. Most have a downside. You start with one policy slot, and Code of Laws and Bureaucracy add more.
 - **Dynasties matter.** Every king, queen, prince and princess has a gender, a matching name, a generated portrait and two traits. Rulers age a year each turn, and die. Educate your heir through events. A ruler slain in battle can set your towns revolting, and dying without an heir is worse.
-- **Diplomacy is simple and sharp.** Everyone starts at peace. AI houses declare war when they smell weakness, and they gang up on whoever is about to win. You can declare war, or buy peace with tribute.
+- **Diplomacy runs on opinion.** Every house has an opinion of every other, from −100 to +100, and the Diplomacy tab lists each reason: wars, treaties, shared enemies, touching borders, envy of the leader, fear of a big army, and remembered deeds (gifts, betrayals, abandoned allies) that fade over time.
+  - **The negotiation table:** offer or ask for gold, towns and techs, and put treaties on the table:
+    - a non-aggression pact
+    - a trade agreement that pays both sides every turn
+    - an alliance (allies defend each other and may cross each other's land)
+    - a royal marriage for your heir
+    - fealty (they become your vassal)
+    - joining your war
+
+    You see exactly how the other house weighs every term before you propose.
+  - **Oaths bind:** breaking a pact or alliance costs renown, and every court remembers. Refusing an ally's call to arms ends the alliance.
+  - **Vassals:** they pay a quarter of their gold as tribute, follow you to war, give +1 renown a turn, and count as conquered for a conquest victory. A vassal that grows strong enough may rebel.
+  - **The AI plays the same game:** computer houses sign pacts and trade deals, marry and ally with each other, and force crushed rivals to kneel. Their envoys bring you offers, demands for tribute and calls to arms. They still declare war when they smell weakness, and they still gang up on the leader.
 - **Each house plays differently:**
   - Varr has cheap iron troops.
   - Selene has trade bonuses.
@@ -53,8 +65,9 @@ index.html, hexmarch.css    page and styling
 js/data.js                  all tunable numbers: units, buildings, traits, houses, win conditions
 js/hex.js                   hex-grid maths
 js/world.js                 procedural map and initial state
-js/rules.js                 movement, combat, economy, market, diplomacy, succession, turn flow
-js/events.js                court events
+js/rules.js                 movement, combat, economy, market, war and peace, succession, turn flow
+js/diplomacy.js             opinions and memories, treaties, vassals, negotiated deals, calls to arms
+js/events.js                court events, envoys and calls to arms
 js/ai.js                    AI opponents (a generator that yields one visible action at a time)
 js/board.js                 SVG board rendering and animation
 js/art/painter.js           procedural terrain painter: blended biomes, hill shading, coasts, forests, farmland, roads
@@ -65,6 +78,7 @@ js/art/vignettes.js         woodcut illustrations for court events
 js/main.js                  UI controller: input, panels, modals, turn flow, saving
 js/audio.js                 Web Audio sound effects
 tests/hexmarch.test.mjs     determinism, combat preview == result, full AI games, invariants
+tests/diplomacy.test.mjs    opinions, deals, oaths, alliances, vassals, save migration
 ```
 
 The engine is plain JSON state with a seeded RNG, so it runs headless in Node. The tests play complete

@@ -52,6 +52,13 @@ const I = {
   shrine: '<path d="M12 2.5l1.6 5.2 5.4.1-4.4 3.2 1.7 5.2L12 13l-4.3 3.2 1.7-5.2L5 7.8l5.4-.1z" fill="currentColor"/><path d="M6 21h12M8 21v-3h8v3" fill="none" stroke="currentColor" stroke-width="1.5"/>',
   hammer: '<path d="M14 6.5l3.5 3.5M4 20l9-9" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M11 5.5l4-2.5 5.5 5.5-2.5 4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
   skull: '<path d="M12 3.5c-4.4 0-7.5 3-7.5 7 0 2.4 1.1 4 2.8 5v3h9.4v-3c1.7-1 2.8-2.6 2.8-5 0-4-3.1-7-7.5-7z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="11" r="1.8" fill="currentColor"/><circle cx="15" cy="11" r="1.8" fill="currentColor"/><path d="M10.5 18.5v2M13.5 18.5v2" stroke="currentColor" stroke-width="1.4"/>',
+  handshake: '<path d="M2.5 9.5l3.5-3 4 1.3 2.2-1 3.8 1 5.5-.6v6.3l-3 1.4-4.6 4.6a1.6 1.6 0 0 1-2.3 0L6.8 15l-4.3-.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12.2 6.8L8.6 10.4a1.4 1.4 0 0 0 2 2l2.6-2.1 4.3 4.3M12.8 17.4l-2.2-2.2M15 15.6l-2.2-2.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  seal: '<path d="M5 3.5h10.5L19 7v13.5H5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 8.5h7M8 11.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="14.5" cy="16.5" r="3" fill="currentColor"/><path d="M13 19.5l-1 3 2.5-1.2 2.5 1.2-1-3" fill="currentColor"/>',
+  chain: '<rect x="2" y="8.8" width="11" height="6.4" rx="3.2" transform="rotate(-35 7.5 12)" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="11" y="8.8" width="11" height="6.4" rx="3.2" transform="rotate(-35 16.5 12)" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+  ring: '<circle cx="12" cy="14.5" r="6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M9.3 6.4L12 3l2.7 3.4L12 8.6z" fill="currentColor"/>',
+  horn: '<path d="M3 10c5 0 10.5-2.5 16-6.5v16C13.5 15.5 8 13.5 3 13.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M6 14l1.4 6h3l-1.2-5.6M21 9v4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  broken: '<path d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 7.6l-1.8 4 2.6 2.2-2 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  gift: '<rect x="3.5" y="9" width="17" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 13v7.5h14V13M12 9v11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9C10 5 6.5 4.5 6.5 7S10 9 12 9c2 0 5.5-.5 5.5-2S14 5 12 9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
   dove: '<path d="M3 13c3 0 5-1 7-4 1-1.5 2.5-3 5-3 1.5 0 2.5.7 3 1.6l2.5.4-2.2 1.6c0 4.4-3.3 8.4-9.3 8.4-2.3 0-4.4-.7-6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="8" r="0.9" fill="currentColor"/>',
 };
 
@@ -72,7 +79,7 @@ export function icon(name, cls = '') {
 }
 
 // Swap the emoji the rules engine writes into log lines for matching icons.
-const LOG_ICONS = { '💰': 'gold', '🌾': 'grain', '🪵': 'timber', '⛏': 'iron', '📜': 'lore', '⚔': 'attack', '🏰': 'castle', '☠': 'skull', '💀': 'skull', '👑': 'crown', '🕊': 'dove', '⬆': 'hammer', '⛪': 'shrine', '⭐': 'renown', '🔥': 'danger', '🍞': 'grain', '⚱': 'skull', '👶': 'crown' };
+const LOG_ICONS = { '💰': 'gold', '🌾': 'grain', '🪵': 'timber', '⛏': 'iron', '📜': 'lore', '⚔': 'attack', '🏰': 'castle', '☠': 'skull', '💀': 'skull', '👑': 'crown', '🕊': 'dove', '⬆': 'hammer', '⛪': 'shrine', '⭐': 'renown', '🔥': 'danger', '🍞': 'grain', '⚱': 'skull', '👶': 'crown', '🤝': 'handshake', '⛓': 'chain', '💍': 'ring', '📯': 'horn', '💔': 'broken', '🎁': 'gift' };
 const LOG_RE = new RegExp(`(${Object.keys(LOG_ICONS).join('|')})\\uFE0F?`, 'gu');
 export function iconize(escapedText) {
   return escapedText.replace(LOG_RE, (m, e) => icon(LOG_ICONS[e], 'inline'));

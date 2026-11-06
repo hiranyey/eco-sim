@@ -10,6 +10,9 @@ import {
   techAvailable, setResearch, policySlots, policyAvailable, adoptPolicy, dropPolicy, renownSources,
 } from './rules.js';
 import { trigger } from './events.js';
+import {
+  opinionOf, evaluateDeal, dealProblem, applyDeal, declareIndependence, bloc, bordering, pactWith, allied, heirOf,
+} from './diplomacy.js';
 
 // Distance-to-goal field (lower = more attractive) via multi-source Dijkstra.
 function goalField(s, fid, forRuler = false) {
@@ -213,40 +216,99 @@ function nearestThreat(s, fid, c) {
   return d;
 }
 
-function near(s, a, b) {
-  return citiesOf(s, a).some((x) => citiesOf(s, b).some((y) => distance(W, x.tile, y.tile) <= 6));
-}
-
 function diplomacy(s, fid) {
   const f = s.factions[fid];
   const mine = strength(s, fid);
+  // Vassals follow their liege, until they feel strong enough to break free.
+  if (f.overlord != null) {
+    const lord = f.overlord;
+    if (mine > strength(s, lord) * 1.25 && opinionOf(s, fid, lord) < 0 && rand(s) < 0.35) declareIndependence(s, fid);
+    return;
+  }
   const wars = atWarWith(s, fid);
   for (const e of wars) {
+    const E = s.factions[e];
+    if (E.overlord != null) continue; // peace comes through its liege
     const theirs = strength(s, e);
     const r = relation(s, fid, e);
     const losing = mine < theirs * 0.6;
     const long = s.turn - r.since > 14;
-    if (!losing && !long) continue;
     if (e === s.playerId) {
+      if (!losing && !long) continue;
       if ((f.lastOffer ?? -99) + 6 > s.turn) continue;
       f.lastOffer = s.turn;
       trigger(s, s.playerId, 'peace_offer', { from: fid, gold: losing ? Math.min(f.gold, 6 + Math.round(theirs - mine)) : 0 });
-    } else {
-      const theirView = strength(s, e) < mine * 0.6 || long;
-      if (theirView) makePeace(s, fid, e);
+      continue;
     }
+    // A crushed rival with little left may be made to kneel.
+    if (theirs < mine * 0.45 && citiesOf(s, e).length <= 2) {
+      const items = [{ k: 'peace' }, { k: 'vassal' }];
+      if (!dealProblem(s, fid, e, items) && evaluateDeal(s, fid, e, items).accept) { applyDeal(s, fid, e, items); continue; }
+    }
+    if (!losing && !long) continue;
+    if (strength(s, e) < mine * 0.6 || long) makePeace(s, fid, e);
   }
-  if (s.turn < 8 || wars.length >= (mine > 25 ? 2 : 1)) return;
+  courtship(s, fid);
+  if (s.turn < 8 || atWarWith(s, fid).length >= (mine > 25 ? 2 : 1)) return;
   const leader = [...s.factions].filter((x) => x.alive).sort((a, b) => b.renown - a.renown)[0];
   const aggression = s.difficulty === 'hard' ? 0.45 : s.difficulty === 'easy' ? 0.2 : 0.32;
   for (const o of s.factions) {
     if (!o.alive || o.id === fid || relation(s, fid, o.id).war || relation(s, fid, o.id).truce > s.turn) continue;
+    if (allied(s, fid, o.id) || o.overlord === fid) continue;
     const grace = s.difficulty === 'easy' ? 16 : s.difficulty === 'hard' ? 8 : 10;
-    if (!near(s, fid, o.id) || (o.id === s.playerId && s.turn < grace)) continue;
-    const ratio = mine / Math.max(1, strength(s, o.id));
+    if (!bordering(s, fid, o.id) || (o.id === s.playerId && s.turn < grace)) continue;
+    const op = opinionOf(s, fid, o.id);
+    if (op >= 25) continue;
+    // Size up the whole bloc: allies and liege lords come to the defence.
+    const target = o.overlord != null ? o.overlord : o.id;
+    const ratio = bloc(s, fid) / Math.max(1, bloc(s, target));
     const isLeader = o.id === leader.id && o.renown >= RENOWN_TO_WIN * 0.55;
-    if ((ratio > 1.3 || (isLeader && ratio > 0.85)) && rand(s) < aggression + (isLeader ? 0.25 : 0)) {
+    if (pactWith(s, fid, o.id) && !(ratio > 2.2 && op < -30 && isLeader)) continue;
+    if ((ratio > 1.3 || (isLeader && ratio > 0.85)) && rand(s) < aggression + (isLeader ? 0.25 : 0) - op / 200) {
       declareWar(s, fid, o.id);
+      return;
+    }
+  }
+}
+
+// Seek treaties: at most one diplomatic move a turn.
+function courtship(s, fid) {
+  const f = s.factions[fid];
+  if (rand(s) > 0.4) return;
+  const others = s.factions.filter((o) => o.alive && o.id !== fid && o.overlord == null && !relation(s, fid, o.id).war);
+  others.sort(() => rand(s) - 0.5);
+  for (const o of others) {
+    const r = relation(s, fid, o.id);
+    const op = opinionOf(s, fid, o.id);
+    if (o.id === s.playerId) {
+      if ((f.lastEnvoy ?? -99) + 6 > s.turn || s.envoyTurn === s.turn || s.turn < 4) continue;
+      const P = s.playerId;
+      const common = atWarWith(s, fid).find((x) => relation(s, P, x).war);
+      let ev = null;
+      if (!r.alliance && common != null && op >= 25) ev = ['envoy_alliance', { from: fid, against: common }];
+      else if (!r.trade && op >= 0 && rand(s) < 0.6) ev = ['envoy_trade', { from: fid }];
+      else if (!(r.pact > s.turn) && op >= 5 && bordering(s, fid, P) && rand(s) < 0.5) ev = ['envoy_pact', { from: fid }];
+      else if (s.turn >= 12 && !r.alliance && !(r.pact > s.turn) && r.truce <= s.turn && op < -5 && bordering(s, fid, P)
+        && strength(s, fid) > strength(s, P) * 1.7 && s.factions[P].gold >= 8 && rand(s) < 0.4) {
+        ev = ['envoy_demand', { from: fid, gold: Math.min(25, Math.max(6, Math.round(s.factions[P].gold * 0.4))) }];
+      }
+      if (!ev) continue;
+      f.lastEnvoy = s.turn;
+      s.envoyTurn = s.turn;
+      trigger(s, P, ev[0], ev[1]);
+      return;
+    }
+    // Between computer houses, both sides must find the deal worth it.
+    const tries = [];
+    if (!r.alliance && op >= 20) tries.push([{ k: 'alliance' }]);
+    if (!r.trade) tries.push([{ k: 'trade' }]);
+    if (!(r.pact > s.turn)) tries.push([{ k: 'pact' }]);
+    const h = heirOf(s, fid);
+    if (h && !h.spouseId && h.age >= 12 && op >= 10) tries.push([{ k: 'marriage' }]);
+    for (const items of tries) {
+      if (dealProblem(s, fid, o.id, items)) continue;
+      if (!evaluateDeal(s, fid, o.id, items).accept || evaluateDeal(s, o.id, fid, items).score <= 0) continue;
+      applyDeal(s, fid, o.id, items);
       return;
     }
   }
