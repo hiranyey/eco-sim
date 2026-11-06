@@ -146,8 +146,8 @@ export function attackTargets(s, u) {
 export function combatPreview(s, att, def, fromTile = att.tile) {
   const aStat = attackStat(s, att, def, fromTile);
   const dStat = defenseStat(s, def, att);
-  const aForce = aStat * (att.hp / maxHp(s, att.type, att.owner));
-  const dForce = dStat * (def.hp / maxHp(s, def.type, def.owner));
+  const aForce = aStat * (att.hp / maxHp(s, att.type, att.owner, att.vet));
+  const dForce = dStat * (def.hp / maxHp(s, def.type, def.owner, def.vet));
   const total = aForce + dForce;
   let dmg = Math.round((aForce / total) * aStat * 4.5);
   if (UNITS[att.type].siege && cityAt(s, def.tile)) dmg *= 2;
@@ -191,6 +191,13 @@ export function attack(s, uid, targetId) {
   if (t.hp <= 0) {
     res.killed = true;
     killUnit(s, t, u.owner);
+    u.kills = (u.kills ?? 0) + 1;
+    if (u.kills >= 3 && !u.vet && u.type !== 'ruler') {
+      u.vet = true;
+      u.hp += 4;
+      res.veteran = true;
+      if (u.owner === s.playerId) log(s, `⭐ Your ${UNITS[u.type].name} have become veterans (+4 HP).`, 'good');
+    }
     if (u.owner >= 0) {
       s.factions[u.owner].stats.kills++;
       addRenown(s, u.owner, 1, 'battle');
@@ -467,7 +474,7 @@ export function strength(s, fid) {
   let v = 0;
   for (const u of unitsOf(s, fid)) {
     const U = UNITS[u.type];
-    v += (U.atk + U.def) * (u.hp / maxHp(s, u.type, u.owner));
+    v += (U.atk + U.def) * (u.hp / maxHp(s, u.type, u.owner, u.vet));
   }
   return v;
 }
@@ -562,7 +569,7 @@ export function beginTurn(s, fid) {
 
 function heal(s, fid) {
   for (const u of unitsOf(s, fid)) {
-    const max = maxHp(s, u.type, u.owner);
+    const max = maxHp(s, u.type, u.owner, u.vet);
     let h = 0;
     if (!u.moved && !u.attacked) {
       const c = cityAt(s, u.tile);
@@ -620,6 +627,34 @@ export function checkVictory(s) {
   if (top) s.winner = { id: top.id, reason: 'renown' };
   else if (alive.length === 1) s.winner = { id: alive[0].id, reason: 'conquest' };
   else if (!s.factions[s.playerId].alive) s.winner = { id: [...alive].sort((a, b) => b.renown - a.renown)[0].id, reason: 'eliminated' };
+}
+
+// Hexes that enemy armies (at war with fid) could strike on their next turn.
+export function threatTiles(s, fid) {
+  const out = new Set();
+  for (const e of s.units) {
+    if (e.owner < 0 || !hostile(s, fid, e.owner)) continue;
+    const U = UNITS[e.type];
+    const from = new Map([[e.tile, movePoints(s, e)]]);
+    if (!U.siege) {
+      const q = [e.tile];
+      while (q.length) {
+        const c = q.shift();
+        const rem = from.get(c);
+        if (rem <= 0) continue;
+        for (const n of neighbors(W, H, c)) {
+          const T = TERRAIN[s.tiles[n].t];
+          if (!T.pass) continue;
+          const occ = unitAt(s, n);
+          if (occ && occ.owner !== e.owner) continue;
+          const r = T.move > 1 ? 0 : rem - 1;
+          if (!from.has(n) || from.get(n) < r) { from.set(n, r); q.push(n); }
+        }
+      }
+    }
+    for (const t of from.keys()) for (const x of within(W, H, t, U.range)) if (TERRAIN[s.tiles[x].t].pass) out.add(x);
+  }
+  return out;
 }
 
 export function readyUnits(s, fid) {

@@ -201,8 +201,8 @@ export function addUnit(s, type, owner, tile) {
   return u;
 }
 
-export function maxHp(s, type, owner) {
-  let hp = UNITS[type].hp;
+export function maxHp(s, type, owner, vet = false) {
+  let hp = UNITS[type].hp + (vet ? 4 : 0);
   if (type === 'ruler' && owner >= 0) {
     const r = s.characters[s.factions[owner].rulerId];
     if (r?.traits.includes('robust')) hp += 4;
