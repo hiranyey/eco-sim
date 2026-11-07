@@ -24,6 +24,11 @@ export function createBoard(svg, handlers) {
   // Camera: the visible part of the map as an SVG viewBox.
   let full = [0, 0, 1, 1];
   let view = [0, 0, 1, 1];
+  // Camera: the centre of the view in map units and the scale in map units per screen pixel.
+  let cam = null;
+  let atHome = false;
+  let follow = true; // keep fitting the view to the player's lands until they zoom or pan by hand
+  let lastW = 0;
 
   function el(tag, attrs = {}, parent = null) {
     const e = document.createElementNS(NS, tag);
@@ -38,6 +43,8 @@ export function createBoard(svg, handlers) {
     const [w, h] = mapSize(s.W, s.H);
     full = [0, 0, Math.round(w), Math.round(h)];
     view = [...full];
+    cam = null;
+    follow = true;
     applyView();
     const owners = [...s.factions.map((f) => [f.id, f.color]), [-1, REBEL_COLOR]];
     svg.innerHTML = `<defs>
@@ -94,36 +101,79 @@ export function createBoard(svg, handlers) {
   }
 
   // ---------- camera ----------
-  const MAX_ZOOM = 2.6;
+  const MAX_ZOOM = 3.4;
+  // Room the floating controls take at the edges of the board, kept clear when fitting the view.
+  const SAFE = { top: 60, bottom: 72, left: 12, right: 12 };
   let suppressClick = false;
   let dragging = false;
   const pointers = new Map();
   let pinch = null;
 
-  function zoomLevel() { return full[2] / view[2]; }
-
-  // When zoomed in, the view takes the shape of the screen area so no space is wasted.
-  function heightFor(w) {
+  function screen() {
     const r = svg.getBoundingClientRect();
-    const aspect = r.width > 0 && r.height > 0 ? r.width / r.height : full[2] / full[3];
-    return Math.min(full[3], w / aspect);
+    return r.width > 0 && r.height > 0 ? [r.width, r.height] : [full[2], full[3]];
+  }
+  // Scale at which the whole map fits in the safe area: zoom level 1.
+  function wholeScale() {
+    const [sw, sh] = screen();
+    return Math.max(full[2] / Math.max(1, sw - SAFE.left - SAFE.right), full[3] / Math.max(1, sh - SAFE.top - SAFE.bottom));
+  }
+  function zoomLevel() { return cam ? wholeScale() / cam.k : 1; }
+
+  // The view to open on: the land the player has explored (all of it without fog), fitted to the screen.
+  function homeCam() {
+    const [sw, sh] = screen();
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    const fogged = handlers.interactive !== false && s.fog?.on;
+    for (let i = 0; i < s.tiles.length; i++) {
+      if (fogged && !s.fog.explored[i]) continue;
+      const [cx, cy] = center(s.W, i);
+      x0 = Math.min(x0, cx - HEX); x1 = Math.max(x1, cx + HEX);
+      y0 = Math.min(y0, cy - HEX); y1 = Math.max(y1, cy + HEX);
+    }
+    if (!Number.isFinite(x0)) [x0, y0, x1, y1] = [0, 0, full[2], full[3]];
+    if (!fogged) [x0, y0, x1, y1] = [0, 0, full[2], full[3]];
+    const k = Math.max((x1 - x0) / Math.max(1, sw - SAFE.left - SAFE.right), (y1 - y0) / Math.max(1, sh - SAFE.top - SAFE.bottom));
+    // Centre the region in the safe area, not the whole screen.
+    return { x: (x0 + x1) / 2 - ((SAFE.left - SAFE.right) / 2) * k, y: (y0 + y1) / 2 - ((SAFE.top - SAFE.bottom) / 2) * k, k };
   }
 
   function applyView() {
-    // Keep the view inside the map (with a little slack) and no wider than the whole map.
-    const z = zoomLevel();
-    if (z <= 1.001) view = [...full];
-    else {
-      const cy = view[1] + view[3] / 2;
-      view[3] = heightFor(view[2]);
-      view[1] = cy - view[3] / 2;
-      view[0] = Math.min(Math.max(view[0], -view[2] * 0.08), full[2] - view[2] * 0.92);
-      view[1] = Math.min(Math.max(view[1], -view[3] * 0.08), full[3] - view[3] * 0.92);
+    if (handlers.interactive === false) {
+      // The start-screen preview simply shows the whole map; its box takes the map's shape.
+      view = [...full];
+      svg.setAttribute('viewBox', view.join(' '));
+      return;
     }
+    const [sw, sh] = screen();
+    cam ??= homeCam();
+    const kMax = wholeScale();
+    cam.k = Math.min(kMax, Math.max(kMax / MAX_ZOOM, cam.k));
+    // Fully zoomed out, the whole map sits centred in the area the controls leave free.
+    if (cam.k >= kMax * 0.999) {
+      cam.x = full[2] / 2 - ((SAFE.left - SAFE.right) / 2) * cam.k;
+      cam.y = full[3] / 2 - ((SAFE.top - SAFE.bottom) / 2) * cam.k;
+    }
+    // The view always takes the shape of the board, so the map fills it edge to edge.
+    const w = sw * cam.k;
+    const h = sh * cam.k;
+    const clampAxis = (c, size, total) => (size >= total ? Math.min(size / 2, Math.max(total - size / 2, c)) : Math.min(total - size / 2 + size * 0.08, Math.max(size / 2 - size * 0.08, c)));
+    cam.x = clampAxis(cam.x, w, full[2]);
+    cam.y = clampAxis(cam.y, h, full[3]);
+    view = [cam.x - w / 2, cam.y - h / 2, w, h];
     svg.setAttribute('viewBox', view.map((v) => v.toFixed(1)).join(' '));
-    svg.classList.toggle('zoomed', zoomLevel() > 1.01);
-    handlers.onView?.(zoomLevel());
+    const z = zoomLevel();
+    svg.classList.toggle('zoomed', z > 1.01);
+    const home = homeCam();
+    atHome = Math.abs(home.k - cam.k) < home.k * 0.02 && Math.hypot(home.x - cam.x, home.y - cam.y) < HEX * 0.5;
+    lastW = sw;
+    handlers.onView?.(z, atHome);
   }
+
+  function goHome() { cam = homeCam(); follow = true; applyView(); }
 
   function toMap(clientX, clientY) {
     const m = svg.getScreenCTM();
@@ -136,36 +186,52 @@ export function createBoard(svg, handlers) {
   }
 
   function zoomAt(clientX, clientY, factor) {
-    const z = zoomLevel();
-    const nz = Math.min(MAX_ZOOM, Math.max(1, z * factor));
-    if (Math.abs(nz - z) < 1e-4) return;
-    const [mx, my] = clientX == null ? [view[0] + view[2] / 2, view[1] + view[3] / 2] : toMap(clientX, clientY);
-    const nw = full[2] / nz;
-    const nh = nz <= 1.001 ? full[3] : heightFor(nw);
-    view = [mx - ((mx - view[0]) / view[2]) * nw, my - ((my - view[1]) / view[3]) * nh, nw, nh];
+    if (!cam) return;
+    follow = false;
+    const kMax = wholeScale();
+    const nk = Math.min(kMax, Math.max(kMax / MAX_ZOOM, cam.k / factor));
+    if (Math.abs(nk - cam.k) < 1e-6) return;
+    // Keep the point under the cursor (or the centre) fixed while zooming.
+    const [mx, my] = clientX == null ? [cam.x, cam.y] : toMap(clientX, clientY);
+    cam.x = mx - (mx - cam.x) * (nk / cam.k);
+    cam.y = my - (my - cam.y) * (nk / cam.k);
+    cam.k = nk;
     applyView();
   }
 
   function panBy(dxClient, dyClient) {
-    const m = svg.getScreenCTM();
-    if (!m) return;
-    view[0] -= dxClient / m.a;
-    view[1] -= dyClient / m.d;
+    if (!cam) return;
+    follow = false;
+    cam.x -= dxClient * cam.k;
+    cam.y -= dyClient * cam.k;
     applyView();
   }
 
   function centerOn(tile) {
-    if (zoomLevel() <= 1.01) return;
+    if (!cam) return;
     const [x, y] = center(s.W, tile);
-    const margin = 0.18;
-    const inside = x > view[0] + view[2] * margin && x < view[0] + view[2] * (1 - margin) && y > view[1] + view[3] * margin && y < view[1] + view[3] * (1 - margin);
+    // Only move when the hex is hidden or under the floating controls.
+    const k = cam.k;
+    const inside = x - HEX > view[0] + SAFE.left * k && x + HEX < view[0] + view[2] - SAFE.right * k
+      && y - HEX > view[1] + SAFE.top * k && y + HEX < view[1] + view[3] - SAFE.bottom * k;
     if (inside) return;
-    view[0] = x - view[2] / 2;
-    view[1] = y - view[3] / 2;
+    cam.x = x;
+    cam.y = y;
     applyView();
   }
 
   function bindCamera() {
+    // Keep the view shaped to the board when the window or layout changes size.
+    // At the home view, refit; otherwise keep the same stretch of map across the board.
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        if (!cam) return;
+        const [sw] = screen();
+        if (atHome) cam = homeCam();
+        else if (lastW > 0) cam.k *= lastW / sw;
+        applyView();
+      }).observe(svg);
+    }
     svg.addEventListener('wheel', (e) => {
       e.preventDefault();
       zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)));
@@ -193,7 +259,7 @@ export function createBoard(svg, handlers) {
         dragging = true;
         return;
       }
-      if (!dragging && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 7 && zoomLevel() > 1.01) {
+      if (!dragging && Math.hypot(e.clientX - p.x0, e.clientY - p.y0) > 7 && (view[2] < full[2] - 1 || view[3] < full[3] - 1)) {
         dragging = true;
         svg.setPointerCapture?.(e.pointerId);
         svg.classList.add('panning');
@@ -241,6 +307,7 @@ export function createBoard(svg, handlers) {
     if (!s) return;
     vis = handlers.interactive === false ? null : reveal(s); // the start-screen preview shows the whole map
     drawFog();
+    if (cam) applyView();
     // Territory tint and borders, as the player last saw them
     layers.tint.innerHTML = '';
     layers.borders.innerHTML = '';
@@ -614,15 +681,15 @@ export function createBoard(svg, handlers) {
 
   return {
     build, render, animateMove, animateAttack, float, pulse, showPath, setHover, shockwave, sparkle,
-    zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: () => { view = [...full]; applyView(); },
+    zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: goHome, wholeMap: () => { cam = { x: 0, y: 0, k: wholeScale() }; applyView(); },
     centerOn, zoomLevel, tileCenter: (t) => center(s.W, t), isFogged, isExplored, terrain: () => terrainReady,
+    followsHome: () => follow,
     zoomTo: (z, tile) => {
-      const nz = Math.min(MAX_ZOOM, Math.max(1, z));
+      follow = false;
       const [x, y] = center(s.W, tile);
-      const nw = full[2] / nz;
-      const nh = heightFor(nw);
-      view = [x - nw / 2, y - nh / 2, nw, nh];
+      cam = { x, y, k: wholeScale() / Math.min(MAX_ZOOM, Math.max(1, z)) };
       applyView();
     },
+    refit: () => { if (cam) applyView(); },
   };
 }

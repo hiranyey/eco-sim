@@ -62,7 +62,7 @@ HTTP, not opened from disk.
   - **Shared sight:** allies and vassals share what they see.
   - **The AI:** computer houses are not limited by fog.
 
-**Map:** zoom with the mouse wheel, pinch or the `+`/`−` buttons, and drag to pan. Phones start zoomed in on your capital.
+**Map:** the board fills its whole area and opens fitted to the land you have explored (the whole map without fog of war), growing with it each turn. Zoom with the mouse wheel, pinch or the `+`/`−` buttons, drag to pan, and press the fit button or `0` to return to your lands.
 
 **Quality of life:** Undo move (`U`), Danger zones that show every hex enemies can strike next turn (`D`), Next unit (`N`), a "While you waited" report after each enemy turn, an early-goals checklist, autosave, three difficulty levels, three enemy-turn speeds, and synthesized sound effects.
 

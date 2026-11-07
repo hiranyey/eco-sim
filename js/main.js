@@ -84,7 +84,7 @@ function mountGame(s) {
           <div class="zoom-tools">
             <button data-act="zoomin" title="Zoom in (+ or mouse wheel)">${icon('plus')}</button>
             <button data-act="zoomout" title="Zoom out (−)">${icon('minus')}</button>
-            <button data-act="zoomfit" title="Show the whole map (0)">${icon('fit')}</button>
+            <button data-act="zoomfit" title="Fit the view to your lands (0)">${icon('fit')}</button>
           </div>
           <div class="map-tools">
             <button data-act="danger" class="chip" title="Shade every hex enemies can strike next turn (D)">${icon('danger')}<span>Danger zones</span></button>
@@ -112,9 +112,6 @@ function mountGame(s) {
     </div>`;
   ui.board = createBoard(root.querySelector('.board'), { onTileClick, onTileHover, onCancel: deselect, onView: onZoom });
   ui.board.build(s);
-  // Phones: start zoomed in on the capital so units are big enough to tap.
-  const cap = s.cities.find((c) => c.owner === s.playerId && c.capital);
-  if (cap && window.innerWidth < 700) ui.board.zoomTo(1.8, cap.tile);
   root.querySelector('.game').addEventListener('click', onClick);
   render();
   if (!prefs.seenTutorial) showHelp(true);
@@ -741,12 +738,12 @@ async function onTileClick(tile) {
   select(tile === ui.selectedTile && !seenUnitAt(tile) ? null : tile);
 }
 
-function onZoom(z) {
+function onZoom(z, home) {
   const zt = root.querySelector('.zoom-tools');
   if (!zt) return;
   zt.querySelector('[data-act="zoomout"]').disabled = z <= 1.01;
-  zt.querySelector('[data-act="zoomfit"]').disabled = z <= 1.01;
-  zt.querySelector('[data-act="zoomin"]').disabled = z >= 2.55;
+  zt.querySelector('[data-act="zoomfit"]').disabled = home;
+  zt.querySelector('[data-act="zoomin"]').disabled = z >= 3.35;
 }
 
 function onTileHover(tile, e) {
@@ -1060,6 +1057,7 @@ async function playerEndTurn() {
   autosave();
   if (s.winner) return showEnd();
   sfx.turn();
+  if (ui.board.followsHome()) ui.board.resetView(); // the view grows with the land you have explored
   banner(`Turn ${s.turn} · Your move`, me().color, me());
   report(s.log.slice(Math.max(0, logStart - (s.log.length > 190 ? 10 : 0))).filter((l) => l.turn >= turnStart));
   afterPlayerTurnStarts();
