@@ -12,12 +12,11 @@ const I = {
     <ellipse cx="9.4" cy="8" rx="1.6" ry="2.7" transform="rotate(-30 9.4 8)"/><ellipse cx="14.6" cy="8" rx="1.6" ry="2.7" transform="rotate(30 14.6 8)"/>
     <ellipse cx="9.4" cy="12" rx="1.6" ry="2.7" transform="rotate(-30 9.4 12)"/><ellipse cx="14.6" cy="12" rx="1.6" ry="2.7" transform="rotate(30 14.6 12)"/>
     <ellipse cx="9.6" cy="16" rx="1.5" ry="2.5" transform="rotate(-30 9.6 16)"/><ellipse cx="14.4" cy="16" rx="1.5" ry="2.5" transform="rotate(30 14.4 16)"/></g>`,
-  timber: `<g stroke="#4a2e14" stroke-width="0.9"><rect x="3" y="12.5" width="16" height="6" rx="3" fill="#a8743f"/><ellipse cx="19" cy="15.5" rx="2.4" ry="3" fill="#e8c38c"/>
-    <rect x="5" y="6" width="16" height="6" rx="3" fill="#b8824a"/><ellipse cx="21" cy="9" rx="2.4" ry="3" fill="#f0cf9a"/></g>
-    <path d="M7 9h8M5.5 15.5h8" stroke="#6b4422" stroke-width="0.8" stroke-linecap="round"/><circle cx="21" cy="9" r="1" fill="none" stroke="#a8743f" stroke-width="0.6"/><circle cx="19" cy="15.5" r="1" fill="none" stroke="#a8743f" stroke-width="0.6"/>`,
-  iron: `<path d="M2.5 18.5l3-6h11l3 6z" fill="#56616c" stroke="#2c333a" stroke-width="0.9" stroke-linejoin="round"/>
-    <path d="M5.5 12.5l2.4-5h8.2l2.4 5z" fill="url(#ig-iron)" stroke="#2c333a" stroke-width="0.9" stroke-linejoin="round"/>
-    <path d="M8.6 9h3.6" stroke="#fff" stroke-width="0.9" stroke-linecap="round" opacity="0.8"/>`,
+  materials: `<g stroke="#4a2e14" stroke-width="0.9"><rect x="3" y="4" width="16" height="6" rx="3" fill="#b8824a"/><ellipse cx="19" cy="7" rx="2.4" ry="3" fill="#f0cf9a"/></g>
+    <path d="M5 7h8" stroke="#6b4422" stroke-width="0.8" stroke-linecap="round"/><circle cx="19" cy="7" r="1" fill="none" stroke="#a8743f" stroke-width="0.6"/>
+    <path d="M3 21l2.6-5.5h11.8L20 21z" fill="#56616c" stroke="#2c333a" stroke-width="0.9" stroke-linejoin="round"/>
+    <path d="M6 15.5l2-4h7l2 4z" fill="url(#ig-iron)" stroke="#2c333a" stroke-width="0.9" stroke-linejoin="round"/>
+    <path d="M9 13.2h3" stroke="#fff" stroke-width="0.9" stroke-linecap="round" opacity="0.8"/>`,
   lore: `<path d="M6 4h11a2 2 0 0 1 2 2v12.5a2.5 2.5 0 0 1-2.5 2.5H7" fill="#f2e2b8" stroke="#6b4f22" stroke-width="1"/>
     <path d="M6 4a2 2 0 0 0-2 2v1.5h4V6a2 2 0 0 0-2-2z" fill="#d9c08a" stroke="#6b4f22" stroke-width="1"/>
     <path d="M7 21a2.5 2.5 0 0 1-2.5-2.5V17H14v1.5A2.5 2.5 0 0 0 16.5 21z" fill="#d9c08a" stroke="#6b4f22" stroke-width="1"/>
@@ -63,7 +62,7 @@ const I = {
   dove: '<path d="M3 13c3 0 5-1 7-4 1-1.5 2.5-3 5-3 1.5 0 2.5.7 3 1.6l2.5.4-2.2 1.6c0 4.4-3.3 8.4-9.3 8.4-2.3 0-4.4-.7-6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="16" cy="8" r="0.9" fill="currentColor"/>',
 };
 
-const ALIAS = { '💰': 'gold', '🌾': 'grain', '🪵': 'timber', '⛏': 'iron', '📜': 'lore', '★': 'renown', '❤': 'hp', '⚔': 'attack', '🛡': 'defence', '🥾': 'move', '🎯': 'range', '👑': 'crown', '🏰': 'castle', '⚖': 'scales' };
+const ALIAS = { '💰': 'gold', '🌾': 'grain', '🪵': 'materials', '⛏': 'materials', '📜': 'lore', '★': 'renown', '❤': 'hp', '⚔': 'attack', '🛡': 'defence', '🥾': 'move', '🎯': 'range', '👑': 'crown', '🏰': 'castle', '⚖': 'scales' };
 
 const DEFS = [
   ['ig-coin', '<radialGradient id="ig-coin" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#fff2b0"/><stop offset="0.55" stop-color="#f0c040"/><stop offset="1" stop-color="#a8741a"/></radialGradient>'],
@@ -80,7 +79,7 @@ export function icon(name, cls = '') {
 }
 
 // Swap the emoji the rules engine writes into log lines for matching icons.
-const LOG_ICONS = { '💰': 'gold', '🌾': 'grain', '🪵': 'timber', '⛏': 'iron', '📜': 'lore', '⚔': 'attack', '🏰': 'castle', '☠': 'skull', '💀': 'skull', '👑': 'crown', '🕊': 'dove', '⬆': 'hammer', '⛪': 'shrine', '⭐': 'renown', '🔥': 'danger', '🍞': 'grain', '⚱': 'skull', '👶': 'crown', '🤝': 'handshake', '⛓': 'chain', '💍': 'ring', '📯': 'horn', '💔': 'broken', '🎁': 'gift' };
+const LOG_ICONS = { '💰': 'gold', '🌾': 'grain', '🪵': 'materials', '⛏': 'materials', '📜': 'lore', '⚔': 'attack', '🏰': 'castle', '☠': 'skull', '💀': 'skull', '👑': 'crown', '🕊': 'dove', '⬆': 'hammer', '⛪': 'shrine', '⭐': 'renown', '🔥': 'danger', '🍞': 'grain', '⚱': 'skull', '👶': 'crown', '🤝': 'handshake', '⛓': 'chain', '💍': 'ring', '📯': 'horn', '💔': 'broken', '🎁': 'gift' };
 const LOG_RE = new RegExp(`(${Object.keys(LOG_ICONS).join('|')})\\uFE0F?`, 'gu');
 export function iconize(escapedText) {
   return escapedText.replace(LOG_RE, (m, e) => icon(LOG_ICONS[e], 'inline'));

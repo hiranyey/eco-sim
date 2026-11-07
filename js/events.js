@@ -36,7 +36,7 @@ export const EVENTS = {
     find: () => ({}),
     text: () => 'Miners in the hills have struck a seam of good iron.',
     options: [
-      { label: 'Work it for the crown', hint: '+4 iron', fx: (s, fid) => { fac(s, fid).iron += 4; } },
+      { label: 'Work it for the crown', hint: '+5 materials', fx: (s, fid) => { fac(s, fid).materials += 5; } },
       { label: 'Sell the mining rights', hint: '+7 gold', fx: (s, fid) => { fac(s, fid).gold += 7; } },
     ],
   },
@@ -45,7 +45,7 @@ export const EVENTS = {
     find: () => ({}),
     text: () => 'Woodcutters ask leave to fell an ancient forest that local folk hold sacred.',
     options: [
-      { label: 'Fell it', hint: '+6 timber', fx: (s, fid) => { fac(s, fid).timber += 6; } },
+      { label: 'Fell it', hint: '+6 materials', fx: (s, fid) => { fac(s, fid).materials += 6; } },
       { label: 'Spare the grove', hint: '+1 renown', fx: (s, fid) => { addRenown(s, fid, 1, 'events'); } },
     ],
   },

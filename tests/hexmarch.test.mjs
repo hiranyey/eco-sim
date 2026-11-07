@@ -35,7 +35,7 @@ function sane(s) {
     assert.ok(u.hp > 0, 'dead unit left on the map');
   }
   for (const f of s.factions) {
-    for (const k of ['gold', 'grain', 'timber', 'iron', 'renown']) assert.ok(Number.isFinite(f[k]) && f[k] >= 0, `${f.short} ${k}=${f[k]}`);
+    for (const k of ['gold', 'grain', 'materials', 'renown']) assert.ok(Number.isFinite(f[k]) && f[k] >= 0, `${f.short} ${k}=${f[k]}`);
     if (f.alive) assert.ok(citiesOf(s, f.id).length > 0, 'alive house without towns');
     assert.ok(s.units.filter((u) => u.owner === f.id && u.type === 'ruler').length <= 1, 'more than one ruler on the map');
   }
@@ -100,11 +100,12 @@ test('recruiting, trading and income', () => {
   f.gold = 50;
   assert.equal(typeof recruit(s, s.playerId, cap.id, 'militia'), 'object');
   assert.equal(typeof recruit(s, s.playerId, cap.id, 'militia'), 'string', 'one recruit per turn without barracks');
-  const q = quote(s, s.playerId, 'iron', 3, 'buy');
+  const q = quote(s, s.playerId, 'materials', 3, 'buy');
   const before = f.gold;
-  trade(s, s.playerId, 'iron', 3, 'buy');
+  trade(s, s.playerId, 'materials', 3, 'buy');
   assert.equal(f.gold, before - q.total);
-  assert.ok(s.market.iron > 4, 'buying raises the price');
+  assert.equal(quote(s, s.playerId, 'materials', 3, 'buy').total, q.total, 'prices are fixed');
+  assert.ok(quote(s, s.playerId, 'materials', 1, 'sell').total < quote(s, s.playerId, 'materials', 1, 'buy').total, 'selling pays less than buying costs');
   const inc = income(s, s.playerId);
   assert.ok(inc.gold > 0);
 });

@@ -11,7 +11,7 @@ import {
 } from './rules.js';
 import { trigger } from './events.js';
 import {
-  opinionOf, evaluateDeal, dealProblem, applyDeal, declareIndependence, bloc, bordering, pactWith, allied, heirOf,
+  opinionOf, evaluateDeal, dealProblem, applyDeal, bloc, bordering, pactWith, allied, heirOf,
 } from './diplomacy.js';
 
 // Distance-to-goal field (lower = more attractive) via multi-source Dijkstra.
@@ -143,13 +143,12 @@ function economy(s, fid) {
   const inc = income(s, fid);
   const grainNet = inc.grain - inc.upkeep;
   if (f.grain + grainNet * 2 < 0 && f.gold > 6) trade(s, fid, 'grain', Math.min(6, Math.ceil(-(f.grain + grainNet * 2))), 'buy');
-  const keep = { grain: 10 + inc.upkeep * 2, timber: 12, iron: 10 };
+  const keep = { grain: 10 + inc.upkeep * 2, materials: 24 };
   for (const g of Object.keys(GOODS)) {
     const extra = f[g] - keep[g];
-    if (extra > 0 && s.market[g] >= GOODS[g].base * 0.8) trade(s, fid, g, Math.min(extra, 8), 'sell');
+    if (extra > 0) trade(s, fid, g, Math.min(extra, 8), 'sell');
   }
-  if (f.gold > 25 && f.iron < 3) trade(s, fid, 'iron', 3, 'buy');
-  if (f.gold > 25 && f.timber < 4) trade(s, fid, 'timber', 4, 'buy');
+  if (f.gold > 25 && f.materials < 6) trade(s, fid, 'materials', 6, 'buy');
 }
 
 function develop(s, fid, reserve) {
@@ -219,12 +218,7 @@ function nearestThreat(s, fid, c) {
 function diplomacy(s, fid) {
   const f = s.factions[fid];
   const mine = strength(s, fid);
-  // Vassals follow their liege, until they feel strong enough to break free.
-  if (f.overlord != null) {
-    const lord = f.overlord;
-    if (mine > strength(s, lord) * 1.25 && opinionOf(s, fid, lord) < 0 && rand(s) < 0.35) declareIndependence(s, fid);
-    return;
-  }
+  if (f.overlord != null) return; // vassals follow their liege
   const wars = atWarWith(s, fid);
   for (const e of wars) {
     const E = s.factions[e];

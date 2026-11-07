@@ -436,16 +436,6 @@ export function releaseVassal(s, lord, v) {
   return { type: 'release' };
 }
 
-export function declareIndependence(s, v) {
-  const V = s.factions[v];
-  const lord = V.overlord;
-  if (lord == null) return;
-  V.overlord = null;
-  remember(s, lord, v, 'Rebelled against us', -30, { decay: 0.5 });
-  log(s, `⚔ ${V.name} throws off the yoke of ${s.factions[lord].short} and declares independence!`, lord === s.playerId ? 'bad' : 'war');
-  declareWar(s, v, lord, { called: true, quiet: true });
-}
-
 export function sendGift(s, a, b, n) {
   if (s.factions[a].gold < n) return 'Not enough gold';
   if (relation(s, a, b).war) return 'They will not accept gifts from an enemy';

@@ -6,7 +6,7 @@ import {
 } from './data.js';
 import {
   unitAt, cityAt, citiesOf, reachable, pathTo, attackTargets, combatPreview, moveUnit, attack, recruit,
-  upgradeCity, build, trade, quote, income, unitCost, upgradeCost, buildingCost, canAfford, relation, declareWar,
+  upgradeCity, build, trade, quote, prices, income, unitCost, upgradeCost, buildingCost, canAfford, relation, declareWar,
   offerPeace, endTurn, beginTurn, currentFaction, canAttack, readyUnits, hostile, defenseBonus,
   recruitLimit, renownIncome, movePoints, threatTiles, recruitSpot, baseAtk, baseDef, techAvailable, setResearch,
   policySlots, policyAvailable, adoptPolicy, dropPolicy,
@@ -98,7 +98,7 @@ function mountGame(s) {
         <aside class="side">
           <nav class="tabs">
             <button data-act="tab" data-v="select">${icon('castle')}<span>Selection</span></button>
-            <button data-act="tab" data-v="market">${icon('scales')}<span>Market</span></button>
+            <button data-act="tab" data-v="market">${icon('scales')}<span>Exchange</span></button>
             <button data-act="tab" data-v="research">${icon('book')}<span>Research</span></button>
             <button data-act="tab" data-v="court">${icon('crown')}<span>Court</span></button>
             <button data-act="tab" data-v="diplo">${icon('handshake')}<span>Diplomacy</span></button>
@@ -153,8 +153,7 @@ function renderBar() {
   root.querySelector('.res').innerHTML =
     r('💰', f.gold, inc.gold, `Gold: recruits, upgrades and buildings${inc.trade ? ` (trade +${inc.trade})` : ''}${inc.tribute ? ` (tribute ${inc.tribute > 0 ? '+' : ''}${inc.tribute})` : ''}`) +
     r('🌾', f.grain, net, `Grain: each soldier eats 1 per turn (${inc.grain} grown, ${inc.upkeep} eaten). If it runs out, soldiers starve.`, f.grain + net < 0) +
-    r('🪵', f.timber, inc.timber, 'Timber: archers, catapults, upgrades and buildings') +
-    r('⛏', f.iron, inc.iron, 'Iron: spearmen, cavalry, knights') +
+    r('🪵', f.materials, inc.materials, 'Materials: timber and iron from forests and hills, for troops, upgrades and buildings') +
     loreChip(f, inc.lore);
   root.querySelector('.race').innerHTML = s.factions.map((x) => `
     <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown${x.overlord != null ? `, vassal of ${esc(s.factions[x.overlord].short)}` : ''}">
@@ -228,11 +227,11 @@ function cityCard(c) {
   const owner = c.owner < 0 ? { name: 'Free town (rebels)', color: '#6d6a75' } : s.factions[c.owner];
   const L = CITY_LEVELS[c.level];
   const tiles = s.tiles.map((t, i) => i).filter((i) => s.tiles[i].city === c.id);
-  const yields = {};
+  const yields = c.capital ? { grain: 2 } : {};
   for (const t of tiles) { const y = TERRAIN[s.tiles[t].t].yields; yields[y] = (yields[y] ?? 0) + L.tileYield; }
   let out = `<div class="card city-card">
     <div class="ph"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite(c, owner.color)}</svg><div><div class="ph-title">${esc(c.name)}${c.capital ? '<span class="tag">Capital</span>' : ''}</div><div class="ph-sub"><span class="dot" style="background:${owner.color}"></span>${esc(owner.name)} · Level ${c.level}</div></div></div>
-    <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${c.capital ? `<span>${icon('grain')}+2</span>` : ''}${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="hint">per turn</span></div>`;
+    <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="hint">per turn</span></div>`;
   if (!mine) {
     out += `<p class="hint">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : peaceWords(c.owner)}</p></div>`;
     return out;
@@ -329,36 +328,15 @@ function paneSelect() {
   return out + goals();
 }
 
-// Tiny price chart: the line is the market price by round, the dashed line the base price.
-function sparkline(vals, base) {
-  const W = 92;
-  const H = 26;
-  const v = vals.slice(-20);
-  if (v.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"><path d="M0,${H / 2}H${W}" class="base"/></svg>`;
-  const lo = Math.min(base * 0.6, ...v);
-  const hi = Math.max(base * 1.4, ...v);
-  const y = (x) => (H - 3 - ((x - lo) / (hi - lo)) * (H - 6)).toFixed(1);
-  const pts = v.map((x, i) => `${((i / (v.length - 1)) * W).toFixed(1)},${y(x)}`);
-  const last = v[v.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="M0,${y(base)}H${W}" class="base"/>
-    <path d="M0,${H}L${pts.join('L')}L${W},${H}Z" class="area"/><path d="M${pts.join('L')}" class="line ${last > base * 1.1 ? 'hi' : last < base * 0.9 ? 'lo' : ''}"/>
-    <circle cx="${W}" cy="${y(last)}" r="2.4" class="dot"/></svg>`;
-}
-
 function paneMarket() {
   const s = ui.s;
   const f = me();
   const can = myTurn();
   const rows = Object.entries(GOODS).map(([g, G]) => {
-    const p = s.market[g];
-    const trend = p > G.base * 1.15 ? '<small class="neg">High</small>' : p < G.base * 0.85 ? '<small class="pos">Low</small>' : '<small class="faint">Steady</small>';
-    const b1 = quote(s, s.playerId, g, 1, 'buy').total;
-    const b5 = quote(s, s.playerId, g, 5, 'buy').total;
-    const s1 = quote(s, s.playerId, g, 1, 'sell').total;
-    const s5 = quote(s, s.playerId, g, 5, 'sell').total;
+    const { buy: b1, sell: s1 } = prices(s, s.playerId, g);
+    const [b5, s5] = [b1 * 5, s1 * 5];
     return `<div class="card ware">
-      <div class="ph"><div><div class="ph-title">${icon(g)}${G.name}</div><div class="ph-sub">You have <b>${f[g]}</b> · base price ${G.base}</div></div>
-        <div class="ware-mid">${sparkline([...(s.priceHistory?.[g] ?? []), p], G.base)}<span class="price">${p.toFixed(1)}${trend}</span></div></div>
+      <div class="ph"><div><div class="ph-title">${icon(g)}${G.name}</div><div class="ph-sub">You have <b>${f[g]}</b> · buy for ${b1}${icon('gold')}, sell for ${s1}${icon('gold')}</div></div></div>
       <div class="tradebar">
         <button data-act="trade" data-g="${g}" data-n="1" data-side="buy" ${can && f.gold >= b1 ? '' : 'disabled'}>Buy 1 <small>−${b1}${icon('gold')}</small></button>
         <button data-act="trade" data-g="${g}" data-n="5" data-side="buy" ${can && f.gold >= b5 ? '' : 'disabled'}>Buy 5 <small>−${b5}${icon('gold')}</small></button>
@@ -366,7 +344,7 @@ function paneMarket() {
         <button data-act="trade" data-g="${g}" data-n="5" data-side="sell" ${can && f[g] >= 5 ? '' : 'disabled'}>Sell 5 <small>+${s5}${icon('gold')}</small></button>
       </div></div>`;
   }).join('');
-  return `<p class="hint">One market serves all four houses: every purchase raises the price for everyone, every sale lowers it, and prices drift back over time.</p>${rows}`;
+  return `<p class="hint">Prices never change. House Selene, a Shrewd ruler and the Free Trade policy each get you a better price.</p>${rows}`;
 }
 
 function charCard(c, label, role = 'ruler') {
@@ -1154,7 +1132,7 @@ function showHelp(first) {
       <div><b>${icon('lore')}Research</b><p>Your towns make lore. In the Research tab, pick a tech in Warfare, Economy or Statecraft; it completes once enough lore is banked. Techs unlock policies: pick one per slot to shape your realm.</p></div>
       <div><b>${icon('fog')}Fog of war</b><p>You only see what your troops and towns can see: two hexes for most units, three for cavalry, one more from a hill. Enemies in forest show only when you stand next to them. March blind and you may run into an ambush. Allies and vassals share their sight.</p></div>
       <div><b>${icon('handshake')}Diplomacy</b><p>Every house has an opinion of you, and you can see each reason behind it. At the negotiation table, trade gold, towns and techs, or sign pacts, trade agreements, alliances and royal marriages. Crush a rival and it may swear fealty. Break an oath and every court remembers.</p></div>
-      <div><b>${icon('scales')}Market</b><p>Sell what you have too much of, buy what you lack. Prices move with every trade, including your rivals' trades.</p></div>
+      <div><b>${icon('scales')}Exchange</b><p>Forests and hills yield materials, fields and lakes yield grain. Sell what you have too much of and buy what you lack, at fixed prices.</p></div>
       <div><b>${icon('renown')}Veterans</b><p>A unit that wins three fights becomes a veteran: +4 HP. Keep your veterans alive.</p></div>
       <div><b>${icon('danger')}Danger zones</b><p>Toggle them to see every hex the enemy can strike next turn. Misclicked a move? Undo it (as long as nothing was attacked or captured).</p></div>
       <div><b>${icon('crown')}Your ruler</b><p>Your ruler fights on the map and inspires adjacent troops (+25% attack). If they fall, your heir inherits, and some of your towns may revolt.</p></div>
@@ -1257,7 +1235,9 @@ function loadSave() {
     const s = d ? JSON.parse(d) : null;
     for (const f of s?.factions ?? []) {
       f.lore ??= 0; f.techs ??= []; f.policies ??= []; f.research ??= null;
+      if (f.materials == null) { f.materials = (f.timber ?? 0) + (f.iron ?? 0); delete f.timber; delete f.iron; } // timber and iron merged
     }
+    if (s) { delete s.market; delete s.priceHistory; }
     if (s) s.fog ??= newFog(false); // saves from before fog of war play on without it
     return s ? ensureDiplomacy(s) : s;
   } catch { return null; }
@@ -1287,7 +1267,6 @@ function showStart() {
         <div class="seg fogsel"><button data-fog="1">${icon('fog')}On: scout to see</button><button data-fog="0">Off: see everything</button></div>
         <button class="primary big" data-s="go">Ride out</button>
         ${saved && !saved.winner ? `<button class="ghost" data-s="continue">Continue: ${esc(saved.factions[saved.playerId].name)}, turn ${saved.turn}</button>` : ''}
-        <a class="classic" href="classic/">Prefer slow, sprawling grand strategy? Play Crowns &amp; Ledgers →</a>
       </div>
     </div></div>`;
   const svg = root.querySelector('.preview svg');

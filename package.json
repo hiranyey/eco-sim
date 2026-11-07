@@ -1,7 +1,7 @@
 {
   "name": "hexmarch",
   "version": "0.1.0",
-  "description": "Hexmarch: a quick tactical strategy game of rival houses, a shared market and fragile dynasties.",
+  "description": "Hexmarch: a quick tactical strategy game of rival houses, shifting alliances and fragile dynasties.",
   "type": "module",
   "private": true,
   "scripts": {

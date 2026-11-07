@@ -383,7 +383,7 @@ function spawnRuler(s, fid) {
 export function unitCost(s, fid, type, city = null) {
   const c = { ...UNITS[type].cost };
   const key = s.factions[fid].key;
-  if (key === 'varr' && (type === 'spear' || type === 'knight')) c.iron = Math.max(0, (c.iron ?? 0) - 1);
+  if (key === 'varr' && (type === 'spear' || type === 'knight')) c.materials = Math.max(0, (c.materials ?? 0) - 1);
   if (key === 'thorne' && type === 'archer') c.gold -= 2;
   if (key === 'ashkar' && type === 'cavalry') c.gold -= 1;
   if ((type === 'militia' || type === 'spear') && hasPolicy(s, fid, 'conscription')) c.gold = Math.max(1, c.gold - 2);
@@ -486,13 +486,13 @@ export function tileYield(s, tile) {
 
 export function income(s, fid) {
   const f = s.factions[fid];
-  const out = { gold: 0, grain: 0, timber: 0, iron: 0, lore: 0, upkeep: 0 };
+  const out = { gold: 0, grain: 0, materials: 0, lore: 0, upkeep: 0 };
   const has = (t) => hasTech(s, fid, t);
   const pol = (p) => hasPolicy(s, fid, p);
   const cs = citiesOf(s, fid);
   for (const c of cs) {
     const L = CITY_LEVELS[c.level];
-    out.gold += L.gold + (c.capital ? 2 : 0) + (c.capital && f.key === 'selene' ? 2 : 0);
+    out.gold += L.gold + (c.capital ? 2 : 0) + (c.capital && f.key === 'selene' ? 3 : 0);
     out.lore += c.level + (c.capital ? 1 + (has('bureaucracy') ? 2 : 0) : 0);
     if (c.capital) out.grain += 2;
     if (has('rotation')) out.grain += 1;
@@ -500,7 +500,7 @@ export function income(s, fid) {
     if (c.buildings.includes('market')) out.gold += (f.key === 'selene' ? 5 : 3) + (has('guilds') ? 2 : 0) + (pol('freetrade') ? 2 : 0);
     if (c.buildings.includes('granary')) out.grain += 3;
     if (c.buildings.includes('library')) out.lore += 2;
-    if (c.buildings.includes('workshop')) { const w = has('guilds') ? 2 : 1; out.timber += w; out.iron += w; }
+    if (c.buildings.includes('workshop')) out.materials += has('guilds') ? 4 : 2;
     for (const t of within(W, H, c.tile, 1)) {
       if (s.tiles[t].city !== c.id) continue;
       out[tileYield(s, t)] += L.tileYield;
@@ -603,23 +603,18 @@ export function dropPolicy(s, fid, key) {
   return { type: 'policy' };
 }
 
-// ---------- market ----------
-export function spread(s, fid) {
-  let sp = 0.15;
-  if (s.factions[fid].key === 'selene') sp = 0.05;
-  if (hasTrait(s, fid, 'shrewd')) sp -= 0.05;
-  if (hasPolicy(s, fid, 'freetrade')) sp -= 0.08;
-  return Math.max(0.02, sp);
+// ---------- exchange ----------
+// Fixed prices: buy for 1 gold more than a good is worth, sell for 1 less.
+// Each merchant edge (a Shrewd ruler, Free Trade) closes the gap by a step: first sell at full worth, then buy at it.
+// House Selene trades at full worth from the start.
+export function prices(s, fid, good) {
+  const edges = (s.factions[fid].key === 'selene' ? 2 : 0) + hasTrait(s, fid, 'shrewd') + hasPolicy(s, fid, 'freetrade');
+  const base = GOODS[good].base;
+  return { buy: base + (edges >= 2 ? 0 : 1), sell: base - (edges >= 1 ? 0 : 1) };
 }
 
 export function quote(s, fid, good, n, side) {
-  let p = s.market[good];
-  let total = 0;
-  const sp = spread(s, fid);
-  for (let i = 0; i < n; i++) {
-    if (side === 'buy') { total += p * (1 + sp); p = Math.min(15, p * 1.06); } else { total += p * (1 - sp); p = Math.max(1, p * 0.94); }
-  }
-  return { total: side === 'buy' ? Math.ceil(total) : Math.floor(total), newPrice: p };
+  return { total: prices(s, fid, good)[side] * n };
 }
 
 export function trade(s, fid, good, n, side) {
@@ -635,7 +630,6 @@ export function trade(s, fid, good, n, side) {
     f[good] -= n;
     f.gold += q.total;
   }
-  s.market[good] = q.newPrice;
   return { type: 'trade', total: q.total };
 }
 
@@ -743,8 +737,7 @@ export function beginTurn(s, fid) {
   const inc = income(s, fid);
   f.gold += inc.gold;
   f.grain += inc.grain - inc.upkeep;
-  f.timber += inc.timber;
-  f.iron += inc.iron;
+  f.materials += inc.materials;
   f.lore += inc.lore;
   if (f.gold < 0) f.gold = 0;
   progressResearch(s, fid);
@@ -783,13 +776,6 @@ function heal(s, fid) {
 function newRound(s) {
   s.turn++;
   diplomacyRound(s);
-  for (const g of Object.keys(GOODS)) s.market[g] += (GOODS[g].base - s.market[g]) * 0.15;
-  s.priceHistory ??= {};
-  for (const g of Object.keys(GOODS)) {
-    const h = (s.priceHistory[g] ??= []);
-    h.push(Math.round(s.market[g] * 100) / 100);
-    if (h.length > 30) h.shift();
-  }
   for (const f of s.factions) {
     if (!f.alive) continue;
     const r = s.characters[f.rulerId];

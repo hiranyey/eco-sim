@@ -1,8 +1,8 @@
 # Hexmarch
 
 A quick, tactical strategy game for the browser. Four rival houses fight over a borderland of hexes. Each
-house has armies you move by hand, a market shared by all four, and a ruler who fights on the field and
-can die.
+house has armies you move by hand, towns to grow, rivals to bargain with, and a ruler who fights on the
+field and can die.
 
 A game takes about 20–35 turns, roughly 30–45 minutes.
 
@@ -32,7 +32,7 @@ HTTP, not opened from disk.
   - Catapults are siege weapons that do double damage to troops in towns.
   - Your ruler inspires adjacent troops.
   - Three kills make any unit a veteran.
-- **The economy is lean.** Towns produce gold, and the hexes around them produce grain, timber and iron. Every soldier eats grain each turn. Buy and sell on a market whose prices move with every house's trades.
+- **The economy is lean.** Towns produce gold, and the hexes around them produce grain (fields and lakes) or materials (forests and hills). Every soldier eats grain each turn. Buy or sell grain and materials at the exchange for fixed prices.
 - **Research and policies.** Towns produce lore (📜): 1 per town level, +1 at the capital, +2 with a Library. Spend it on three ladders of four techs each: **Warfare** (Drill Yards, Longbows, Stirrups, Trebuchets), **Economy** (Crop Rotation, Coinage, Guilds, Architecture) and **Statecraft** (Code of Laws, Primogeniture, Bureaucracy, Divine Right). A game is long enough for only about half of them. Techs unlock **policies** such as Tithes, Conscription, Warrior Code, Free Trade and Bastion Towns. Most have a downside. You start with one policy slot, and Code of Laws and Bureaucracy add more.
 - **Dynasties matter.** Every king, queen, prince and princess has a gender, a matching name, a generated portrait and two traits. Rulers age a year each turn, and die. Educate your heir through events. A ruler slain in battle can set your towns revolting, and dying without an heir is worse.
 - **Diplomacy runs on opinion.** Every house has an opinion of every other, from −100 to +100, and the Diplomacy tab lists each reason: wars, treaties, shared enemies, touching borders, envy of the leader, fear of a big army, and remembered deeds (gifts, betrayals, abandoned allies) that fade over time.
@@ -46,10 +46,10 @@ HTTP, not opened from disk.
 
     You see exactly how the other house weighs every term before you propose.
   - **Oaths bind:** breaking a pact or alliance costs renown, and every court remembers. Refusing an ally's call to arms ends the alliance.
-  - **Vassals:** they pay a quarter of their gold as tribute, follow you to war, give +1 renown a turn, and count as conquered for a conquest victory. A vassal that grows strong enough may rebel.
+  - **Vassals:** they pay a quarter of their gold as tribute, follow you to war, give +1 renown a turn, and count as conquered for a conquest victory.
   - **The AI plays the same game:** computer houses sign pacts and trade deals, marry and ally with each other, and force crushed rivals to kneel. Their envoys bring you offers, demands for tribute and calls to arms. They still declare war when they smell weakness, and they still gang up on the leader.
 - **Each house plays differently:**
-  - Varr has cheap iron troops.
+  - Varr has cheap spearmen and knights.
   - Selene has trade bonuses.
   - Thorne has strong archers and forest defence.
   - Ashkar has fast cavalry.
@@ -73,7 +73,7 @@ index.html, hexmarch.css    page and styling
 js/data.js                  all tunable numbers: units, buildings, traits, houses, win conditions
 js/hex.js                   hex-grid maths
 js/world.js                 procedural map and initial state
-js/rules.js                 movement, combat, economy, market, war and peace, succession, turn flow
+js/rules.js                 movement, combat, economy, exchange, war and peace, succession, turn flow
 js/diplomacy.js             opinions and memories, treaties, vassals, negotiated deals, calls to arms
 js/fog.js                   fog of war: sight, forest cover, explored land, remembered towns
 js/events.js                court events, envoys and calls to arms
@@ -94,8 +94,3 @@ tests/fog.test.mjs          sight, memory, forest cover, ambushes, shared sight
 The engine is plain JSON state with a seeded RNG, so it runs headless in Node. The tests play complete
 four-AI games and check invariants: no two units sharing a hex, no negative resources, and every game
 reaching a winner.
-
-## Also in this repo
-
-`classic/` holds **Crowns & Ledgers**, the earlier real-time grand-strategy and economy simulation. It is
-still playable at `/classic/`.
