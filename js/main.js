@@ -66,9 +66,8 @@ function mountGame(s) {
   ui.tab = 'select';
   root.innerHTML = `
     <div class="game">
-      <header class="bar">
-        <div class="logo">Hex<span>march</span></div>
-        <div class="turn"></div>
+      <header class="topbar">
+        <div class="brand"><div class="logo">Hex<span>march</span></div><div class="turn"></div></div>
         <div class="res"></div>
         <div class="race" title="First house to ${RENOWN_TO_WIN} renown wins"></div>
         <div class="tools">
@@ -92,7 +91,7 @@ function mountGame(s) {
           </div>
           <div class="board-actions">
             <button class="undo" data-act="undo" title="Take back your last move (U)">${icon('undo')}<span>Undo move</span></button>
-            <button class="next" data-act="next" title="Select next ready unit (N)">Next unit</button>
+            <button class="next" data-act="next" title="Select next ready unit (N)">${icon('next')}<span>Next unit</span></button>
             <button class="end" data-act="end" title="End turn (E)">End turn</button>
           </div>
         </section>
@@ -138,7 +137,7 @@ function render() {
   const ready = myTurn() ? readyUnits(s, s.playerId).length : 0;
   const end = root.querySelector('.end');
   end.disabled = !myTurn();
-  end.innerHTML = myTurn() ? `End turn${ready ? ` <small>${ready} ready</small>` : ''}` : 'Waiting…';
+  end.innerHTML = myTurn() ? `<span>End turn</span>${ready ? `<small>${ready} unit${ready > 1 ? 's' : ''} ready</small>` : ''}` : '<span>Waiting…</span>';
   end.classList.toggle('glow', myTurn() && ready === 0);
   root.querySelector('.next').disabled = !myTurn() || !ready;
   root.querySelector('.undo').hidden = !(ui.undo && myTurn());
@@ -152,7 +151,7 @@ function renderBar() {
   const f = me();
   const inc = income(s, s.playerId);
   const net = inc.grain - inc.upkeep;
-  root.querySelector('.turn').innerHTML = `<b>Turn ${s.turn}</b><small>of ${TURN_LIMIT}</small>`;
+  root.querySelector('.turn').innerHTML = `<b>Turn ${s.turn}</b><small>/ ${TURN_LIMIT}</small>`;
   const r = (ic, v, d, title, warn = false) => `<div class="r${warn ? ' warn' : ''}" title="${title}">${icon(ic)}<b>${v}</b><small class="${d < 0 ? 'neg' : 'pos'}">${d >= 0 ? '+' : ''}${d}</small></div>`;
   root.querySelector('.res').innerHTML =
     r('💰', f.gold, inc.gold, `Gold: recruits, upgrades and buildings${inc.trade ? ` (trade +${inc.trade})` : ''}${inc.tribute ? ` (tribute ${inc.tribute > 0 ? '+' : ''}${inc.tribute})` : ''}`) +
@@ -162,7 +161,7 @@ function renderBar() {
     loreChip(f, inc.lore);
   root.querySelector('.race').innerHTML = s.factions.map((x) => `
     <div class="runner ${x.alive ? '' : 'dead'} ${x.id === s.playerId ? 'me' : ''} ${currentFaction(s) === x.id ? 'active' : ''}" title="${esc(x.name)}: ${x.renown} renown${x.overlord != null ? `, vassal of ${esc(s.factions[x.overlord].short)}` : ''}">
-      <span class="nm">${crest(x.key, x.color, 'crest xs')}${esc(x.short)}${x.overlord != null ? icon('chain', 'vas') : ''}</span><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span><b>${x.renown}</b>
+      <span class="nm">${crest(x.key, x.color, 'crest xs')}${esc(x.short)}${x.overlord != null ? icon('chain', 'vas') : ''}</span><b>${x.renown}</b><span class="track"><span style="width:${Math.min(100, (x.renown / RENOWN_TO_WIN) * 100)}%;background:${x.color}"></span></span>
     </div>`).join('');
 }
 
@@ -204,13 +203,14 @@ function unitCard(u) {
     status = canMove && canHit ? 'Ready to move and attack' : canHit ? (attackTargets(s, u).length ? 'Can still attack' : 'Can attack (no targets in range)') : canMove ? 'Can still move' : 'Done for this turn';
   }
   const ruler = u.type === 'ruler' && u.owner >= 0 ? s.characters[s.factions[u.owner].rulerId] : null;
-  return `<div class="card unit-card" style="--c:${owner.color}">
-    <div class="row">${ruler ? portrait(ruler, owner.color, { cls: 'portrait sm' }) : iconSvg(u.type, owner.color)}<div><b>${ruler ? `${esc(titled(ruler, 'ruler'))}` : U.name}</b><div class="muted">${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` (×${defenseBonus(s, u)} defence)` : ''}</div></div></div>
-    <div class="hpbar"><span style="width:${(u.hp / max) * 100}%"></span><em>${u.hp} / ${max} HP</em></div>
+  const pct = u.hp / max;
+  const hold = mine && myTurn() && (!u.moved || !u.attacked) ? '<button class="small" data-act="hold" title="Skip this unit; units that hold still heal (F)">Hold</button>' : '';
+  return `<div class="card unit-card">
+    <div class="ph">${ruler ? portrait(ruler, owner.color, { cls: 'portrait sm' }) : iconSvg(u.type, owner.color)}<div><div class="ph-title">${ruler ? esc(titled(ruler, 'ruler')) : U.name}${u.vet ? ' <span class="tag">Veteran</span>' : ''}</div><div class="ph-sub"><span class="dot" style="background:${owner.color}"></span>${esc(owner.name)} · ${TERRAIN[s.tiles[u.tile].t].name}${defenseBonus(s, u) > 1 ? ` ×${defenseBonus(s, u)} def` : ''}</div></div></div>
+    <div class="meter"><div class="meter-l"><span>Health</span><b>${u.hp} / ${max}</b></div><div class="meter-bar"><span class="${pct < 0.34 ? 'low' : pct < 0.67 ? 'mid' : ''}" style="width:${pct * 100}%"></span></div></div>
     ${statLine(u)}
-    <p class="muted small">${U.desc}</p>
-    ${status ? `<p class="status">${status}</p>` : ''}
-    ${mine && myTurn() && (!u.moved || !u.attacked) ? '<button class="ghost small" data-act="hold" title="Skip this unit; units that hold still heal (F)">Hold position</button>' : ''}
+    <p class="hint">${U.desc}</p>
+    ${status ? `<div class="card-foot"><span class="status ${status.startsWith('Done') ? 'done' : ''}">${status}</span>${hold}</div>` : ''}
   </div>`;
 }
 
@@ -219,9 +219,9 @@ function fogCityCard(c) {
   const o = knownOwner(s, c, null);
   const owner = o < 0 ? { name: 'Free town (rebels)', color: '#6d6a75' } : s.factions[o];
   const k = s.fog.known[c.id];
-  return `<div class="card city-card" style="--c:${owner.color}">
-    <div class="row"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite({ ...c, owner: o, level: k?.level ?? c.level }, owner.color)}</svg><div><b>${esc(c.name)}</b><div class="muted">Last seen: ${esc(owner.name)} · Level ${k?.level ?? c.level}</div></div></div>
-    <p class="muted small">Its garrison and current owner are hidden by the fog.</p></div>`;
+  return `<div class="card city-card">
+    <div class="ph"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite({ ...c, owner: o, level: k?.level ?? c.level }, owner.color)}</svg><div><div class="ph-title">${esc(c.name)}</div><div class="ph-sub">Last seen: <span class="dot" style="background:${owner.color}"></span>${esc(owner.name)} · Level ${k?.level ?? c.level}</div></div></div>
+    <p class="hint">Its garrison and current owner are hidden by the fog.</p></div>`;
 }
 
 function cityCard(c) {
@@ -233,37 +233,37 @@ function cityCard(c) {
   const tiles = s.tiles.map((t, i) => i).filter((i) => s.tiles[i].city === c.id);
   const yields = {};
   for (const t of tiles) { const y = TERRAIN[s.tiles[t].t].yields; yields[y] = (yields[y] ?? 0) + L.tileYield; }
-  let out = `<div class="card city-card" style="--c:${owner.color}">
-    <div class="row"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite(c, owner.color)}</svg><div><b>${esc(c.name)}</b>${c.capital ? ' <span class="tag">Capital</span>' : ''}<div class="muted">${esc(owner.name)} · Level ${c.level}</div></div></div>
-    <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${c.capital ? `<span>${icon('grain')}+2</span>` : ''}${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="muted small">per turn</span></div>`;
+  let out = `<div class="card city-card">
+    <div class="ph"><svg class="town-pic" viewBox="-26 -44 52 62" aria-hidden="true">${townSprite(c, owner.color)}</svg><div><div class="ph-title">${esc(c.name)}${c.capital ? '<span class="tag">Capital</span>' : ''}</div><div class="ph-sub"><span class="dot" style="background:${owner.color}"></span>${esc(owner.name)} · Level ${c.level}</div></div></div>
+    <div class="yields"><span>${icon('gold')}${L.gold + (c.capital ? 2 : 0)}</span>${c.capital ? `<span>${icon('grain')}+2</span>` : ''}${Object.entries(yields).map(([k, v]) => `<span>${icon(k)}${v}</span>`).join('')}<span class="hint">per turn</span></div>`;
   if (!mine) {
-    out += `<p class="muted small">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : peaceWords(c.owner)}</p></div>`;
+    out += `<p class="hint">${c.owner < 0 ? 'Walk a unit into an empty free town to claim it (+2 renown).' : hostile(s, s.playerId, c.owner) ? 'At war: take it by moving a unit into it once it is empty (+4 renown, +8 for a capital).' : peaceWords(c.owner)}</p></div>`;
     return out;
   }
   const can = myTurn();
   // Upgrade
   if (c.level < 3) {
     const cost = upgradeCost(s, s.playerId, c);
-    out += `<div class="act-row"><div><b>Grow to level ${c.level + 1}</b><div class="muted small">More gold${c.level === 2 ? ', double yields, +2 renown' : ''}, +1 building slot</div></div>
+    out += `<div class="act-row"><div><b>Grow to level ${c.level + 1}</b><div class="hint">More gold${c.level === 2 ? ', double yields, +2 renown' : ''}, +1 building slot</div></div>
       <button data-act="upgrade" data-v="${c.id}" ${can && canAfford(f, cost) ? '' : 'disabled'}>${costHtml(cost)}</button></div>`;
   }
   // Buildings
   const used = c.buildings.filter((b) => b !== 'cathedral').length;
-  out += `<h4>Buildings <span class="muted">${used}/${c.level} slots</span></h4><div class="blds">`;
+  out += `<h4>Buildings <span>${used} of ${c.level} slots used</span></h4><div class="blds">`;
   for (const [k, B] of Object.entries(BUILDINGS)) {
     const has = c.buildings.includes(k);
     const cost = buildingCost(s, s.playerId, k);
     const realmHasCathedral = k === 'cathedral' && s.cities.some((x) => x.owner === s.playerId && x.buildings.includes('cathedral'));
     const blocked = has || (B.minLevel && c.level < B.minLevel) || (k !== 'cathedral' && used >= c.level) || realmHasCathedral;
     out += `<button class="bld ${has ? 'has' : ''}" data-act="build" data-v="${c.id}" data-b="${k}" ${!has && can && !blocked && canAfford(f, cost) ? '' : 'disabled'} title="${esc(B.desc)}">
-      <b>${has ? '✓ ' : ''}${B.name}</b><small>${esc(B.desc)}</small>${has ? '' : `<span>${costHtml(cost)}</span>`}</button>`;
+      <b>${has ? icon('check') : ''}${B.name}</b><small>${esc(B.desc)}</small>${has ? '' : `<span>${costHtml(cost)}</span>`}</button>`;
   }
   out += '</div>';
   // Recruit
   const left = recruitLimit(c) - c.recruits;
   const blocked = recruitSpot(s, c) == null;
-  out += `<h4>Recruit <span class="muted">${left > 0 ? `${left} left this turn` : 'done this turn'}</span></h4>
-    ${blocked ? '<p class="muted small">No free hex in or beside the town to muster troops.</p>' : unitAt(s, c.tile) ? '<p class="muted small">The town is occupied, so recruits will muster beside it.</p>' : ''}<div class="recruits">`;
+  out += `<h4>Recruit <span>${left > 0 ? `${left} left this turn` : 'Done this turn'}</span></h4>
+    ${blocked ? '<p class="hint mb">No free hex in or beside the town to muster troops.</p>' : unitAt(s, c.tile) ? '<p class="hint mb">The town is occupied, so recruits will muster beside it.</p>' : ''}<div class="recruits">`;
   for (const t of RECRUITABLE) {
     const cost = unitCost(s, s.playerId, t, c);
     const ok = can && left > 0 && !blocked && canAfford(f, cost);
@@ -289,7 +289,8 @@ function goals() {
     ['Pick something to research', f.research != null || f.techs.length > 0],
   ];
   if (list.every(([, d]) => d) || s.turn > 15) return '';
-  return `<div class="card goals"><b>Early goals</b>${list.map(([txt, d]) => `<div class="goal ${d ? 'done' : ''}"><span>${d ? '✔' : '○'}</span>${txt}</div>`).join('')}</div>`;
+  const done = list.filter(([, d]) => d).length;
+  return `<div class="card goals"><div class="ph-title">First steps<small>${done} of ${list.length}</small></div>${list.map(([txt, d]) => `<div class="goal ${d ? 'done' : ''}"><i>${d ? icon('check') : ''}</i>${txt}</div>`).join('')}</div>`;
 }
 
 function paneSelect() {
@@ -297,25 +298,21 @@ function paneSelect() {
   if (ui.selectedTile == null) {
     const f = me();
     const ruler = s.characters[f.rulerId];
-    return `<div class="card intro" style="--c:${f.color}">
-      <div class="row">${crest(f.key, f.color, 'crest md')}<b class="intro-name">${esc(f.name)}</b></div><p class="muted">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</p>
-      <div class="realm">${[
+    return `<div class="card intro">
+      <div class="house-head">${crest(f.key, f.color, 'crest md')}<div><div class="ph-title">${esc(f.name)}</div><div class="ph-sub">${esc(FACTIONS[s.playerId].bonus)}: ${esc(FACTIONS[s.playerId].bonusDesc)}</div></div></div>
+      <div class="statrow">${[
         ['castle', citiesOf(s, s.playerId).length, 'Towns'],
         ['attack', s.units.filter((u) => u.owner === s.playerId && u.type !== 'ruler').length, 'Soldiers'],
-        ['gold', `+${income(s, s.playerId).gold}`, 'Gold / turn'],
-        ['renown', `+${renownIncome(s, s.playerId)}`, 'Renown / turn'],
-      ].map(([ic, v, l]) => `<div>${icon(ic)}<b>${v}</b><small>${l}</small></div>`).join('')}</div>
-      <div class="row ruled">${portrait(ruler, f.color, { cls: 'portrait sm' })}<p>Ruled by <b>${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age}.<br><span class="muted small">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</span></p></div></div>
+        ['gold', `+${income(s, s.playerId).gold}`, 'Gold'],
+        ['renown', `+${renownIncome(s, s.playerId)}`, 'Renown'],
+      ].map(([ic, v, l]) => `<div><b>${v}</b><small>${l}</small></div>`).join('')}</div>
+      <div class="ruler-line">${portrait(ruler, f.color, { cls: 'portrait xs' })}<div>Ruled by <b>${esc(titled(ruler, 'ruler'))}</b>, ${ruler.age}<div class="hint">${ruler.traits.map((t) => TRAITS[t].name).join(' · ')}</div></div></div></div>
       ${goals()}
-      <div class="howto-mini">
-        <p><b>Click a unit</b> to see where it can go. <b>Red rings</b> are enemies in range: hover one to preview the fight.</p>
-        <p><b>Click a town</b> to recruit, grow it, or add buildings.</p>
-        <p>Win renown by taking towns ${'(+2/+4/+8)'}, holding shrines <span class="gold">✦</span> (+1 per turn each), winning battles and building. First to <b>${RENOWN_TO_WIN}</b> wins.</p>
-      </div>`;
+      <p class="hint">Select a unit to see where it can go, or a town to recruit and build. First house to ${RENOWN_TO_WIN} renown wins. Press <kbd>H</kbd> for the full rules.</p>`;
   }
   const t = s.tiles[ui.selectedTile];
   if (!explored(s, ui.selectedTile)) {
-    return `<div class="card fog-card"><b>${icon('fog')}Unexplored</b><p class="muted small">Nobody of yours has seen this land. Send a unit to scout it: cavalry see three hexes, other troops two, and anyone on a hill one more.</p></div>${goals()}`;
+    return `<div class="card fog-card"><div class="ph-title">${icon('fog')}Unexplored</div><p class="hint">Nobody of yours has seen this land. Send a unit to scout it: cavalry see three hexes, other troops two, and anyone on a hill one more.</p></div>${goals()}`;
   }
   const u = seenUnitAt(ui.selectedTile);
   const c = cityAt(s, ui.selectedTile);
@@ -326,9 +323,12 @@ function paneSelect() {
   if (c) out += fogged && c.owner !== s.playerId ? fogCityCard(c) : cityCard(c);
   if (!u && !c) {
     const T = TERRAIN[t.t];
-    out += `<div class="card"><b>${T.name}</b><p class="muted small">${T.pass ? `Movement: ${T.move > 1 ? 'ends your move when entered' : 'normal'}. Defence ×${T.def}.` : 'Impassable.'} ${t.city >= 0 ? `Worked by ${esc(s.cities[t.city].name)}: yields ${icon(T.yields)}.` : ''}</p>
-      ${t.shrine ? '<p><span class="gold">✦ Ancient shrine.</span> A unit standing here at the start of your turn earns +1 renown.</p>' : ''}</div>`;
-  } else if (t.shrine) out += '<p class="small"><span class="gold">✦</span> Shrine: +1 renown per turn for whoever stands here.</p>';
+    out += `<div class="card"><div class="ph-title">${T.name}</div>
+      <div class="kv"><span>Movement</span><b>${T.pass ? (T.move > 1 ? 'Ends your move' : 'Normal') : 'Impassable'}</b></div>
+      ${T.pass ? `<div class="kv"><span>Defence</span><b>×${T.def}</b></div>` : ''}
+      ${t.city >= 0 ? `<div class="kv"><span>Worked by ${esc(s.cities[t.city].name)}</span><b>${icon(T.yields)}</b></div>` : ''}
+      ${t.shrine ? `<p class="hint">${icon('shrine', 'inline')}Ancient shrine: a unit standing here at the start of your turn earns +1 renown.</p>` : ''}</div>`;
+  } else if (t.shrine) out += `<p class="hint">${icon('shrine', 'inline')}Shrine: +1 renown per turn for whoever stands here.</p>`;
   return out + goals();
 }
 
@@ -354,35 +354,35 @@ function paneMarket() {
   const can = myTurn();
   const rows = Object.entries(GOODS).map(([g, G]) => {
     const p = s.market[g];
-    const trend = p > G.base * 1.15 ? '<span class="neg">▲ high</span>' : p < G.base * 0.85 ? '<span class="pos">▼ low</span>' : '<span class="muted">steady</span>';
+    const trend = p > G.base * 1.15 ? '<small class="neg">High</small>' : p < G.base * 0.85 ? '<small class="pos">Low</small>' : '<small class="faint">Steady</small>';
     const b1 = quote(s, s.playerId, g, 1, 'buy').total;
     const b5 = quote(s, s.playerId, g, 5, 'buy').total;
     const s1 = quote(s, s.playerId, g, 1, 'sell').total;
     const s5 = quote(s, s.playerId, g, 5, 'sell').total;
-    return `<div class="good">
-      <div class="row"><b>${icon(g)} ${G.name}</b>${sparkline([...(s.priceHistory?.[g] ?? []), p], G.base)}<span class="price">${p.toFixed(1)} ${trend}</span></div>
-      <div class="muted small">You have <b class="have">${f[g]}</b> · base price ${G.base}</div>
-      <div class="trade">
+    return `<div class="card ware">
+      <div class="ph"><div><div class="ph-title">${icon(g)}${G.name}</div><div class="ph-sub">You have <b>${f[g]}</b> · base price ${G.base}</div></div>
+        <div class="ware-mid">${sparkline([...(s.priceHistory?.[g] ?? []), p], G.base)}<span class="price">${p.toFixed(1)}${trend}</span></div></div>
+      <div class="tradebar">
         <button data-act="trade" data-g="${g}" data-n="1" data-side="buy" ${can && f.gold >= b1 ? '' : 'disabled'}>Buy 1 <small>−${b1}${icon('gold')}</small></button>
         <button data-act="trade" data-g="${g}" data-n="5" data-side="buy" ${can && f.gold >= b5 ? '' : 'disabled'}>Buy 5 <small>−${b5}${icon('gold')}</small></button>
         <button data-act="trade" data-g="${g}" data-n="1" data-side="sell" ${can && f[g] >= 1 ? '' : 'disabled'}>Sell 1 <small>+${s1}${icon('gold')}</small></button>
         <button data-act="trade" data-g="${g}" data-n="5" data-side="sell" ${can && f[g] >= 5 ? '' : 'disabled'}>Sell 5 <small>+${s5}${icon('gold')}</small></button>
       </div></div>`;
   }).join('');
-  return `<p class="muted small">One market serves all four houses. Every purchase pushes the price up and every sale pushes it down, for everyone. Prices drift back over time. Buy cheap, sell dear, and starve your rivals of what they need.</p>${rows}`;
+  return `<p class="hint">One market serves all four houses: every purchase raises the price for everyone, every sale lowers it, and prices drift back over time.</p>${rows}`;
 }
 
 function charCard(c, label, role = 'ruler') {
-  if (!c) return `<div class="card char empty"><div class="portrait-empty">?</div><div><div class="muted small">${label}</div><p class="muted">None yet. An heir may still be born.</p></div></div>`;
-  return `<div class="card char">${portrait(c, me().color, { role, cls: 'portrait lg' })}<div><div class="eyebrow-l">${label}</div><b>${esc(titled(c, role))}</b> <span class="muted">age ${c.age}</span>
-    <div class="traits">${c.traits.map((t) => `<span class="trait" title="${esc(TRAITS[t].desc)}">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div></div>`;
+  if (!c) return `<div class="card"><div class="char"><div class="portrait-empty">?</div><div><div class="eyebrow-l">${label}</div><div class="char-name">None yet</div><p class="hint">An heir may still be born. Without one, a cousin seizes power and more towns revolt.</p></div></div></div>`;
+  return `<div class="card"><div class="char">${portrait(c, me().color, { role, cls: 'portrait lg' })}<div><div class="eyebrow-l">${label}</div><div class="char-name">${esc(titled(c, role))}<small>age ${c.age}</small></div>
+    <div class="traits">${c.traits.map((t) => `<span class="trait">${TRAITS[t].name}<small>${esc(TRAITS[t].desc)}</small></span>`).join('')}</div></div></div>${spouseLine(c)}</div>`;
 }
 
 function spouseLine(c) {
   if (!c?.spouseId) return '';
   const sp = ui.s.characters[c.spouseId];
   const house = sp.house != null ? ui.s.factions[sp.house] : null;
-  return `<div class="spouse">${portrait(sp, house?.color ?? '#888888', { cls: 'portrait xs' })}<span class="small">${c.age < 16 ? 'Betrothed to' : 'Wed to'} <b>${esc(sp.name)}</b>${house ? ` of ${esc(house.name)}` : ''}, age ${sp.age}</span></div>`;
+  return `<div class="spouse">${portrait(sp, house?.color ?? '#888888', { cls: 'portrait xs' })}<span>${c.age < 16 ? 'Betrothed to' : 'Wed to'} <b>${esc(sp.name)}</b>${house ? ` of ${esc(house.name)}` : ''}, ${sp.age}</span></div>`;
 }
 
 function paneCourt() {
@@ -391,11 +391,11 @@ function paneCourt() {
   const ruler = s.characters[f.rulerId];
   const heir = f.heirId != null ? s.characters[f.heirId] : null;
   const rn = renownIncome(s, s.playerId);
-  return `${charCard(ruler, 'Your ruler')}${spouseLine(ruler)}${charCard(heir, 'Heir', 'heir')}${spouseLine(heir)}
-    <p class="muted small">If your ruler dies in battle, the heir takes over, but some towns may revolt. With no heir, a cousin seizes power and the revolts are worse. Each turn is one year. Wed your heir into another house from the Diplomacy tab.</p>
-    <div class="card"><b>${esc(FACTIONS[s.playerId].bonus)}</b><p class="muted small">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
-    <div class="small">Renown: <b>${f.renown}</b> / ${RENOWN_TO_WIN}${rn ? ` · +${rn} per turn from shrines, cathedrals and vassals` : ''}</div></div>
-    <button class="ghost wide" data-act="tab" data-v="diplo">${icon('handshake')} Deal with the other houses</button>`;
+  return `${charCard(ruler, 'Ruler')}${charCard(heir, 'Heir', 'heir')}
+    <p class="hint">If your ruler falls, the heir inherits and some towns may revolt. Each turn is one year. Wed your heir from the Diplomacy tab.</p>
+    <div class="card"><div class="ph-title">${esc(FACTIONS[s.playerId].bonus)}</div><p class="hint">${esc(FACTIONS[s.playerId].bonusDesc)}</p>
+      <div class="kv"><span>Renown</span><b>${f.renown} / ${RENOWN_TO_WIN}</b></div>
+      ${rn ? `<div class="kv"><span>From shrines, cathedrals and vassals</span><b class="pos">+${rn} / turn</b></div>` : ''}</div>`;
 }
 
 // ---------------------------------------------------------------- diplomacy
@@ -441,10 +441,9 @@ function diploWeb() {
     <div class="legend">${['war', 'alliance', 'pact', 'trade', 'vassal', 'truce'].map((k) => `<span class="lg ${k}"><i></i>${{ war: 'War', alliance: 'Alliance', pact: 'Pact', trade: 'Trade', vassal: 'Vassal', truce: 'Truce' }[k]}</span>`).join('')}</div>`;
 }
 
-function opinionMeter(v) {
-  const m = mood(v);
-  const w = Math.abs(v) / 2;
-  return `<div class="opm ${m.cls}" title="Opinion of you: ${v}"><span class="opbar"><i class="${v < 0 ? 'neg' : 'pos'}" style="${v < 0 ? `right:50%;width:${w}%` : `left:50%;width:${w}%`}"></i></span><b>${v > 0 ? '+' : ''}${v}</b><span class="mood">${m.name}</span></div>`;
+function opinionBar(v) {
+  const w = Math.min(50, Math.abs(v) / 2);
+  return `<span class="opbar" title="Opinion of you: ${v}"><i class="${v < 0 ? 'neg' : 'pos'}" style="${v < 0 ? `right:50%;width:${w}%` : `left:50%;width:${w}%`}"></i></span>`;
 }
 
 function reasons(parts, cls = '') {
@@ -459,7 +458,7 @@ function paneDiplo() {
   const inc = income(s, P);
   const mine = bloc(s, P);
   const rows = s.factions.filter((x) => x.id !== P).map((x) => {
-    if (!x.alive) return `<div class="dip dead"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b> <span class="muted">destroyed</span></div>`;
+    if (!x.alive) return `<div class="card dip dead">${crest(x.key, x.color, 'crest sm')}<b>${esc(x.name)}</b><span class="hint">· destroyed</span></div>`;
     const r = relation(s, P, x.id);
     const op = opinion(s, x.id, P);
     const ruler = s.characters[x.rulerId];
@@ -478,27 +477,29 @@ function paneDiplo() {
       war = `<button class="ghost danger-text" data-act="askwar" data-v="${x.id}" ${can ? '' : 'disabled'}>${icon('attack')}War…</button>`;
     }
     const lord = x.overlord != null ? s.factions[x.overlord] : null;
-    return `<div class="dip" style="--c:${x.color}">
-      <div class="row"><b>${crest(x.key, x.color, 'crest sm')}${esc(x.name)}</b><span class="badges">${badges.map((b) => `<span class="badge ${b.k}">${icon(TREATY_ICON[b.k] ?? 'dove')}${esc(b.text)}</span>`).join('')}</span></div>
-      <div class="dip-who">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div class="muted small"><b class="who">${esc(titled(ruler, 'ruler'))}</b>, age ${ruler.age} · ${ruler.traits.map((t) => TRAITS[t].name).join(', ')}<br>${citiesOf(s, x.id).length} towns · ${x.renown} renown${lord ? ` · vassal of ${esc(lord.short)}` : ''}</div></div>
-      ${opinionMeter(op.total)}
+    const m = mood(op.total);
+    const might = theirs > mine * 1.2 ? 'Stronger' : theirs < mine * 0.8 ? 'Weaker' : 'Even';
+    return `<div class="card dip">
+      <div class="dip-top">${portrait(ruler, x.color, { cls: 'portrait xs' })}<div><div class="ph-title">${crest(x.key, x.color, 'crest xs')}${esc(x.name)}</div><div class="ph-sub">${esc(titled(ruler, 'ruler'))}, ${ruler.age}</div><div class="ph-sub">${citiesOf(s, x.id).length} towns · ${x.renown} renown${lord ? ` · vassal of ${esc(lord.short)}` : ''}</div></div>
+        <div class="dip-mood ${m.cls}"><b>${op.total > 0 ? '+' : ''}${op.total}</b><small>${m.name}</small></div></div>
+      ${opinionBar(op.total)}
+      <div class="badges">${badges.map((b) => `<span class="badge ${b.k}">${icon(TREATY_ICON[b.k] ?? 'dove')}${esc(b.text)}</span>`).join('')}</div>
       <details class="whybox"><summary>Why they feel this way</summary>${reasons(op.parts)}</details>
-      <div class="power"><span>Might</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span class="muted small">${theirs > mine * 1.2 ? 'stronger than you' : theirs < mine * 0.8 ? 'weaker than you' : 'about even'}</span></div>
+      <div class="dip-facts"><span>Might</span><span class="pbar"><span style="width:${Math.min(100, (theirs / Math.max(1, mine, theirs)) * 100)}%;background:${x.color}"></span></span><span>${might}${might === 'Even' ? '' : ' than you'}</span></div>
       <div class="acts">
-        ${x.overlord != null && x.overlord !== P ? '<span class="muted small">Speaks only through its liege.</span>' : `<button class="primary-lite" data-act="deal" data-v="${x.id}" ${can ? '' : 'disabled'}>${icon('handshake')}${r.war ? 'Negotiate peace' : 'Negotiate'}</button>`}
-        ${!r.war ? `<button class="ghost" data-act="gift" data-v="${x.id}" ${can && f.gold >= GIFT_GOLD ? '' : 'disabled'} title="Send ${GIFT_GOLD} gold: they will think better of you for a while">${icon('gift')}Gift ${GIFT_GOLD}${icon('gold')}</button>` : ''}
+        ${x.overlord != null && x.overlord !== P ? '<span class="hint">Speaks only through its liege.</span>' : `<button class="primary-lite" data-act="deal" data-v="${x.id}" ${can ? '' : 'disabled'}>${icon('handshake')}${r.war ? 'Negotiate peace' : 'Negotiate'}</button>`}
+        ${!r.war ? `<button class="ghost" data-act="gift" data-v="${x.id}" ${can && f.gold >= GIFT_GOLD ? '' : 'disabled'} title="Send ${GIFT_GOLD} gold: they will think better of you for a while">${icon('gift')}Gift ${GIFT_GOLD}</button>` : ''}
         ${war}
       </div>
     </div>`;
   }).join('');
   const flows = [];
-  if (inc.trade) flows.push(`${icon('scales')} Trade <b class="pos">+${inc.trade}</b>`);
-  if (inc.tribute > 0) flows.push(`${icon('chain')} Tribute from vassals <b class="pos">+${inc.tribute}</b>`);
+  if (inc.trade) flows.push(`<span>${icon('scales')}Trade <b class="pos">+${inc.trade}</b> gold</span>`);
+  if (inc.tribute > 0) flows.push(`<span>${icon('chain')}Tribute <b class="pos">+${inc.tribute}</b> gold</span>`);
   const vs = vassalsOf(s, P);
-  if (vs.length) flows.push(`${icon('renown')} Vassals <b class="pos">+${vs.length}</b> renown`);
+  if (vs.length) flows.push(`<span>${icon('renown')}Vassals <b class="pos">+${vs.length}</b> renown</span>`);
   return `${diploWeb()}
-    ${flows.length ? `<div class="card flows small">${flows.join(' · ')} <span class="muted">per turn</span></div>` : ''}
-    <p class="muted small">Every house keeps a ledger of what you have done to it. Make a deal from the negotiation table: they accept when the terms add up in their favour, and you can see exactly why.</p>
+    ${flows.length ? `<div class="flows">${flows.join('')}<span class="faint">per turn</span></div>` : ''}
     ${rows}`;
 }
 
@@ -541,11 +542,11 @@ function renderDeal() {
   };
   const towns = (fid, list, group) => {
     const cs = citiesOf(s, fid).filter((c) => !c.capital);
-    return cs.length ? cs.map((c) => chip(group, c.id, `${icon('castle')}${esc(c.name)} <small>L${c.level}</small>`, list.includes(c.id))).join('') : '<span class="muted small">No towns besides the capital</span>';
+    return cs.length ? cs.map((c) => chip(group, c.id, `${icon('castle')}${esc(c.name)} <small>L${c.level}</small>`, list.includes(c.id))).join('') : '<span class="hint">No towns besides the capital</span>';
   };
   const techs = (from, to, list, group) => {
     const ts = teachable(s, from, to);
-    return ts.length ? ts.map((k) => chip(group, k, `${icon('book')}${esc(TECHS[k].name)}`, list.includes(k))).join('') : '<span class="muted small">Nothing to teach</span>';
+    return ts.length ? ts.map((k) => chip(group, k, `${icon('book')}${esc(TECHS[k].name)}`, list.includes(k))).join('') : '<span class="hint">No techs to teach</span>';
   };
   const treaty = (k, extra = '') => {
     const on = d.treaties.includes(k);
@@ -562,7 +563,8 @@ function renderDeal() {
     treaty('vassal'),
     ...wars.map((o) => treaty(`joinwar:${o.id}`, `Join war on ${o.short}`)),
   ].join('');
-  const verdict = ev.problem ? `<div class="verdict bad">${icon('lock')}${esc(ev.problem)}</div>`
+  const verdict = !items.length ? `<div class="verdict idle">${icon('scales')}Add terms to see how ${esc(X.short)} weighs them</div>`
+    : ev.problem ? `<div class="verdict bad">${icon('lock')}${esc(ev.problem)}</div>`
     : `<div class="verdict ${ev.accept ? 'good' : 'bad'}">${ev.accept ? `${icon('check')}${esc(X.short)} will accept` : `${esc(X.short)} will refuse`}<span class="score">${ev.score > 0 ? '+' : ''}${ev.score}</span></div>`;
   const m = root.querySelector('.modal');
   const keep = m.querySelector('.dialog')?.scrollTop ?? 0;
@@ -619,7 +621,7 @@ function onDealClick(e) {
     ui.deal = null;
     ui.undo = null;
     closeModal();
-    toast(`${s.factions[res.with].short} agrees`);
+    toast(`${s.factions[res.with].short} agrees`, 'ok');
     autosave();
     if (s.winner) return showEnd();
     render();
@@ -638,38 +640,42 @@ function paneResearch() {
   const T = f.research ? TECHS[f.research] : null;
   const turnsLeft = (cost) => (f.lore >= cost ? 'now' : inc.lore > 0 ? `${Math.ceil((cost - f.lore) / inc.lore)} turns` : 'never');
   let out = `<div class="card research-now">
-    <div class="row"><b>${icon('lore')} Lore ${f.lore}</b><span class="muted small">+${inc.lore} per turn</span></div>
-    ${T ? `<div class="small">Researching <b>${T.name}</b> · ${Math.min(f.lore, T.cost)}/${T.cost} · done in ${turnsLeft(T.cost)}</div>
-      <div class="hpbar lore"><span style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></span></div>`
-    : '<div class="small">Nothing being researched. Lore is banked until you choose.</div>'}
-    <p class="muted small">Every town makes lore equal to its level, the capital +1, a Library +2. Each branch is a ladder: master one step to unlock the next. You won't have time for everything.</p></div>`;
+    <div class="ph"><div class="ph-title">${icon('lore')}${T ? esc(T.name) : 'No research'}</div><span class="hint">${f.lore} lore · +${inc.lore} / turn</span></div>
+    ${T ? `<div class="meter lore"><div class="meter-l"><span>Done in ${turnsLeft(T.cost)}</span><b>${Math.min(f.lore, T.cost)} / ${T.cost}</b></div><div class="meter-bar"><span style="width:${Math.min(100, (f.lore / T.cost) * 100)}%"></span></div></div>`
+    : '<p class="hint">Lore is banked until you pick a tech below. Each branch is a ladder: master one step to unlock the next.</p>'}</div>`;
+  // Each branch is a ladder, drawn as a list: one rung per tier, with a rail linking the rungs.
   out += '<div class="tree">';
   for (const [bk, B] of Object.entries(BRANCHES)) {
-    out += `<div class="branch"><h4>${icon({ war: 'attack', econ: 'scales', state: 'crown' }[bk])} ${B.name}</h4>`;
-    for (const [k, X] of Object.entries(TECHS).filter(([, x]) => x.branch === bk).sort((a, b) => a[1].tier - b[1].tier)) {
+    const rungs = Object.entries(TECHS).filter(([, x]) => x.branch === bk).sort((a, b) => a[1].tier - b[1].tier);
+    const have = rungs.filter(([k]) => f.techs.includes(k)).length;
+    out += `<div class="branch"><h4>${icon({ war: 'attack', econ: 'scales', state: 'crown' }[bk])}${B.name}<span>${have} of ${rungs.length}</span></h4><div class="list">`;
+    for (const [k, X] of rungs) {
       const done = f.techs.includes(k);
       const avail = techAvailable(s, fid, k);
       const cur = f.research === k;
       const unlocks = Object.values(POLICIES).filter((p) => p.req === k).map((p) => p.name);
-      out += `<button class="tech ${done ? 'done' : cur ? 'cur' : avail ? 'avail' : 'locked'}" data-act="research" data-v="${k}" ${can && avail && !cur ? '' : 'disabled'}>
-        <b>${done ? '✓ ' : cur ? '▶ ' : ''}${X.name}</b><small>${esc(X.desc)}</small>
-        ${unlocks.length ? `<small class="unlock">Unlocks policy: ${unlocks.join(', ')}</small>` : ''}
-        ${done ? '' : `<span class="cost">${icon('lore')}${X.cost}${avail && !cur ? ` · ${turnsLeft(X.cost)}` : ''}</span>`}</button>`;
+      const state = done ? 'done' : cur ? 'cur' : avail ? 'avail' : 'locked';
+      const right = done ? '<span class="tech-r pos">Learned</span>'
+        : cur ? `<span class="tech-r gold">${turnsLeft(X.cost) === 'now' ? 'Next turn' : turnsLeft(X.cost)}</span>`
+          : `<span class="tech-r"><span class="cost">${icon('lore')}${X.cost}</span>${avail ? `<small>${turnsLeft(X.cost)}</small>` : ''}</span>`;
+      out += `<button class="tech ${state}" data-act="research" data-v="${k}" ${can && avail && !cur ? '' : 'disabled'} title="${avail && !cur ? `Research ${esc(X.name)}` : ''}">
+        <i class="rung">${done ? icon('check') : cur ? '<span></span>' : ''}</i>
+        <span class="tech-m"><b>${X.name}</b><small>${esc(X.desc)}${unlocks.length ? ` <em>Unlocks ${unlocks.join(', ')}.</em>` : ''}</small></span>${right}</button>`;
     }
-    out += '</div>';
+    out += '</div></div>';
   }
   out += '</div>';
   const slots = policySlots(s, fid);
-  out += `<h4>Policies <span class="muted">${f.policies.length}/${slots} slots</span></h4>
-    <p class="muted small">Adopting a policy costs ${POLICY_COST} gold. Dropping one is free. More slots come from Code of Laws and Bureaucracy.</p><div class="policies">`;
+  out += `<h4>Policies <span>${f.policies.length} of ${slots} slots used</span></h4>
+    <p class="hint mb">Adopting costs ${POLICY_COST} gold, dropping is free. Code of Laws and Bureaucracy add slots.</p><div class="list policies">`;
   for (const [k, P] of Object.entries(POLICIES)) {
     const on = f.policies.includes(k);
     const avail = policyAvailable(s, fid, k);
     const full = f.policies.length >= slots;
     const btn = on ? `<button class="ghost small" data-act="droppol" data-v="${k}" ${can ? '' : 'disabled'}>Drop</button>`
       : avail ? `<button class="small" data-act="adopt" data-v="${k}" ${can && !full && f.gold >= POLICY_COST ? '' : 'disabled'} title="${full ? 'No free slot: drop a policy first' : ''}">Adopt <small>−${POLICY_COST}${icon('gold')}</small></button>`
-        : `<span class="muted small">Needs ${TECHS[P.req].name}</span>`;
-    out += `<div class="policy ${on ? 'on' : avail ? '' : 'locked'}"><div><b>${on ? '✓ ' : ''}${P.name}</b><small>${esc(P.desc)}</small></div>${btn}</div>`;
+        : `<span class="hint">Needs ${TECHS[P.req].name}</span>`;
+    out += `<div class="policy ${on ? 'on' : avail ? '' : 'locked'}"><div><b>${on ? icon('check') : ''}${P.name}</b><small>${esc(P.desc)}</small></div>${btn}</div>`;
   }
   return `${out}</div>`;
 }
@@ -981,7 +987,7 @@ async function onClick(e) {
 
 function toggleDanger() {
   ui.showDanger = !ui.showDanger;
-  if (ui.showDanger && !threatTiles(ui.s, ui.s.playerId).size) toast('No army at war with you can reach your lands. Rebels never leave their towns.');
+  if (ui.showDanger && !threatTiles(ui.s, ui.s.playerId).size) toast('No army at war with you can reach your lands. Rebels never leave their towns.', 'info');
   render();
 }
 
@@ -1157,7 +1163,7 @@ function showHelp(first) {
     </div>
     <h4>The troops</h4>
     <div class="roster">${[...RECRUITABLE, 'ruler'].map((t) => { const U = UNITS[t]; return `<div class="ro">${tokenSvg(t, me().color)}<div><b>${U.name}</b><span class="ro-stats">${icon('attack')}${U.atk} ${icon('defence')}${U.def} ${icon('move')}${U.move} ${icon('range')}${U.range} ${icon('hp')}${U.hp}</span><small>${esc(U.desc)}</small></div></div>`; }).join('')}</div>
-    <p class="muted small">Keys: <kbd>N</kbd> next unit · <kbd>F</kbd> hold · <kbd>U</kbd> undo move · <kbd>D</kbd> danger zones · <kbd>E</kbd> end turn · <kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd> zoom · <kbd>Esc</kbd> deselect</p>
+    <p class="small muted keys">Keys: <kbd>N</kbd> next unit · <kbd>F</kbd> hold · <kbd>U</kbd> undo move · <kbd>D</kbd> danger zones · <kbd>E</kbd> end turn · <kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd> zoom · <kbd>Esc</kbd> deselect</p>
     <div class="actions"><button class="primary" data-close>${first ? 'To war!' : 'Got it'}</button></div>`);
   if (first) { prefs.seenTutorial = true; savePrefs(); }
 }
@@ -1194,7 +1200,7 @@ function showEnd() {
   const src = Object.entries(f.stats.renown).filter(([, v]) => v > 0);
   const maxSrc = Math.max(1, ...src.map(([, v]) => v));
   const ranking = [...s.factions].sort((a, b) => b.renown - a.renown);
-  openModal(`<div class="end ${won ? 'won' : 'lost'}">
+  openModal(`<div class="endscreen ${won ? 'won' : 'lost'}">
     <div class="eyebrow">Turn ${s.turn}</div>
     <h2>${won ? 'Victory!' : 'Defeat'}</h2>
     <div class="end-portrait">${portrait(s.characters[w.rulerId], w.color, { cls: 'portrait xl' })}${crest(w.key, w.color, 'crest lg')}</div>
@@ -1225,7 +1231,7 @@ function report(entries) {
   if (items.some((l) => l.kind === 'bad')) sfx.bad();
   const box = root.querySelector('.report') ?? Object.assign(document.createElement('div'), { className: 'report' });
   root.querySelector('.board-wrap').appendChild(box);
-  box.innerHTML = `<div class="report-h">While you waited <button class="x" data-dismiss>✕</button></div>${items.map((l) => `<div class="entry ${l.kind}">${iconize(esc(l.text))}</div>`).join('')}`;
+  box.innerHTML = `<div class="report-h"><span>While you waited</span><button class="x" data-dismiss aria-label="Dismiss">✕</button></div>${items.map((l) => `<div class="entry ${l.kind}">${iconize(esc(l.text))}</div>`).join('')}`;
   box.classList.add('on');
   box.querySelector('[data-dismiss]').onclick = () => box.classList.remove('on');
   clearTimeout(box._t);
@@ -1233,9 +1239,9 @@ function report(entries) {
   void s;
 }
 
-function toast(text) {
+function toast(text, kind = '') {
   const t = document.createElement('div');
-  t.className = 'toast';
+  t.className = `toast ${kind}`;
   t.textContent = text;
   root.querySelector('.toasts')?.appendChild(t);
   setTimeout(() => t.remove(), 2800);
