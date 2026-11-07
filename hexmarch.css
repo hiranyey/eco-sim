@@ -163,7 +163,7 @@ code { background: var(--surface-3); padding: 1px 6px; border-radius: 4px; font-
   position: relative; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 64px 24px 84px; overflow: hidden;
   background: radial-gradient(ellipse at 50% 45%, #13293d, #0a131d 75%);
 }
-svg.board { width: 100%; height: 100%; max-height: 100%; display: block; user-select: none; -webkit-user-select: none; filter: drop-shadow(0 16px 32px rgb(0 0 0 / 0.5)); }
+svg.board { width: 100%; height: 100%; max-height: 100%; display: block; user-select: none; -webkit-user-select: none; }
 /* floating controls over the map share one look */
 .map-tools, .zoom-tools, .board-actions { position: absolute; z-index: 2; display: flex; gap: 8px; }
 .map-tools { left: 16px; top: 16px; }
@@ -810,11 +810,14 @@ svg.board.panning { cursor: grabbing; }
 }
 
 /* ---------- fog of war ---------- */
-.fog-dark polygon { fill: url(#fogPat); stroke: url(#fogPat); stroke-width: 2; }
-.fog-dark { opacity: 0.97; }
-.fog-dim polygon { fill: #08101a; }
-.fog-dim { opacity: 0.46; }
+.fog-dark { fill: url(#fogPat); }
+.fog-dim { fill: rgb(9 15 24 / 0.5); }
+.fog-sight { fill: none; stroke: rgb(255 255 255 / 0.22); stroke-width: 1; stroke-dasharray: 3 3; }
+.fog-edge-under { fill: none; stroke: rgb(0 0 0 / 0.55); stroke-width: 3.5; stroke-linecap: round; }
+.fog-edge { fill: none; stroke: #8a7a55; stroke-width: 1.4; stroke-linecap: round; }
 .layer-fog, .layer-marks { pointer-events: none; }
+.layer-terrain image { transition: opacity 0.25s; }
+.layer-terrain image.ground-loading { opacity: 0; }
 .unit.fading { opacity: 0; transition: opacity 0.3s; }
 
 /* small spacing helpers between primitives */

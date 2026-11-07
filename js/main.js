@@ -1299,9 +1299,10 @@ function showStart() {
     const s = newGame({ seed: choice.seed, playerFaction: choice.faction, difficulty: choice.difficulty });
     board.build(s);
     board.render({ myTurn: false });
-    const art = svg.querySelector('image')?.getAttribute('href');
-    const bd = root.querySelector('.backdrop');
-    if (art && bd) bd.style.backgroundImage = `url(${art})`;
+    board.terrain().then((art) => {
+      const bd = root.querySelector('.backdrop');
+      if (art && bd) bd.style.backgroundImage = `url(${art})`;
+    });
     root.querySelectorAll('.house').forEach((b) => b.classList.toggle('on', +b.dataset.house === choice.faction));
     root.querySelectorAll('[data-diff]').forEach((b) => b.classList.toggle('on', b.dataset.diff === choice.difficulty));
     root.querySelectorAll('[data-fog]').forEach((b) => b.classList.toggle('on', (b.dataset.fog === '1') === choice.fog));

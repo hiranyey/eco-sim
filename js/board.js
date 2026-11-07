@@ -2,7 +2,7 @@
 import { center, corners, mapSize, neighborDir, HEX } from './hex.js';
 import { REBEL_COLOR, UNITS } from './data.js';
 import { maxHp } from './world.js';
-import { paintTerrain } from './art/painter.js';
+import { paintTerrain, terrainScale } from './art/painter.js';
 import { reveal, unitSeen, knownOwner } from './fog.js';
 import { EMBLEM, townSprite, ribbon, shrineSprite, shade } from './art/sprites.js';
 
@@ -19,6 +19,7 @@ export function createBoard(svg, handlers) {
   let layers = {};
   let hoverPoly = null;
   let fogKey = '';
+  let terrainReady = Promise.resolve(null);
   let vis = null; // what the player can see this frame (null: no fog)
   // Camera: the visible part of the map as an SVG viewBox.
   let full = [0, 0, 1, 1];
@@ -50,11 +51,7 @@ export function createBoard(svg, handlers) {
       <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="rgb(200 40 25 / 0.14)"/><rect width="2.6" height="7" fill="rgb(230 60 40 / 0.42)"/></pattern>
       <pattern id="glint" width="60" height="44" patternUnits="userSpaceOnUse"><path d="M6,10q4,-2.6 8,0M30,30q5,-3 10,0M44,8q3,-2 6,0M14,36q3,-2 6,0" fill="none" stroke="rgb(235 248 255 / 0.55)" stroke-width="0.9" stroke-linecap="round"/></pattern>
       <radialGradient id="cloud"><stop offset="0" stop-color="#0a1420" stop-opacity="0.24"/><stop offset="0.6" stop-color="#0a1420" stop-opacity="0.1"/><stop offset="1" stop-color="#0a1420" stop-opacity="0"/></radialGradient>
-      <filter id="fogBlur" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="4.5"/></filter>
-      <radialGradient id="mist"><stop offset="0" stop-color="#3b4b60" stop-opacity="0.55"/><stop offset="1" stop-color="#3b4b60" stop-opacity="0"/></radialGradient>
-      <pattern id="fogPat" width="150" height="110" patternUnits="userSpaceOnUse"><rect width="150" height="110" fill="#0d141e"/>
-        <ellipse cx="30" cy="26" rx="42" ry="22" fill="url(#mist)"/><ellipse cx="112" cy="70" rx="50" ry="24" fill="url(#mist)"/><ellipse cx="60" cy="92" rx="34" ry="16" fill="url(#mist)"/><ellipse cx="140" cy="12" rx="30" ry="14" fill="url(#mist)"/>
-        <path d="M8,60q14,-6 28,0t28,0M84,30q12,-5 24,0t24,0M96,100q10,-4 20,0" fill="none" stroke="#5a6a80" stroke-opacity="0.22" stroke-width="1.2" stroke-linecap="round"/></pattern>
+      <pattern id="fogPat" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="8" height="8" fill="#111925"/><path d="M0,4H8" stroke="#1a2433" stroke-width="1.6"/></pattern>
       <radialGradient id="spark"><stop offset="0" stop-color="#fff8d8"/><stop offset="1" stop-color="#ffd35a" stop-opacity="0"/></radialGradient>
       ${owners.map(([id, c]) => `<radialGradient id="tok${id}" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="${shade(c, 0.28)}"/><stop offset="0.65" stop-color="${c}"/><stop offset="1" stop-color="${shade(c, -0.45)}"/></radialGradient>`).join('')}
       <clipPath id="waterClip">${s.tiles.map((t, i) => (t.t === 'water' ? `<polygon points="${pts(corners(...center(s.W, i), HEX + 1))}"/>` : '')).join('')}</clipPath>
@@ -62,8 +59,15 @@ export function createBoard(svg, handlers) {
     </defs>`;
     layers = {};
     for (const name of ['terrain', 'water', 'grid', 'tint', 'borders', 'clouds', 'hl', 'sites', 'fog', 'marks', 'hover', 'path', 'units', 'rings', 'fx']) layers[name] = el('g', { class: `layer-${name}` }, svg);
-    const art = paintTerrain(s);
-    el('image', { href: art.url, x: 0, y: 0, width: art.width, height: art.height, preserveAspectRatio: 'none' }, layers.terrain);
+    const art = paintTerrain(s, terrainScale(handlers.interactive === false));
+    const ground = el('image', { x: 0, y: 0, width: art.width, height: art.height, preserveAspectRatio: 'none' }, layers.terrain);
+    // The painting is encoded in the background; it fades in the moment it is ready.
+    if (art.url) ground.setAttribute('href', art.url);
+    else {
+      ground.classList.add('ground-loading');
+      art.ready.then((u) => { ground.setAttribute('href', u); requestAnimationFrame(() => ground.classList.remove('ground-loading')); });
+    }
+    terrainReady = art.ready;
     // Atmosphere: glints drifting over open water, cloud shadows drifting over everything.
     layers.water.setAttribute('clip-path', 'url(#waterClip)');
     el('rect', { x: -120, y: -60, width: art.width + 240, height: art.height + 120, fill: 'url(#glint)', class: 'glints' }, layers.water);
@@ -71,11 +75,6 @@ export function createBoard(svg, handlers) {
     layers.clouds.setAttribute('clip-path', 'url(#mapClip)');
     layers.fog.setAttribute('clip-path', 'url(#mapClip)');
     fogKey = '';
-    for (let k = 0; k < 5; k++) {
-      const cy = (art.height * (k + 0.5)) / 5 + ((k * 37) % 40) - 20;
-      const rx = 90 + ((k * 53) % 70);
-      el('ellipse', { cx: -rx, cy, rx, ry: rx * 0.55, fill: 'url(#cloud)', class: 'cloud', style: `--dur:${110 + k * 23}s;--delay:${-k * 31}s;--dist:${art.width + rx * 2}px` }, layers.clouds);
-    }
     hoverPoly = el('polygon', { points: '', class: 'hover-hex' }, layers.hover);
     for (let i = 0; i < s.tiles.length; i++) {
       const [cx, cy] = center(s.W, i);
@@ -338,13 +337,52 @@ export function createBoard(svg, handlers) {
     if (key === fogKey) return;
     fogKey = key;
     layers.fog.innerHTML = '';
-    const dim = el('g', { class: 'fog-dim', filter: 'url(#fogBlur)' }, layers.fog);
-    const dark = el('g', { class: 'fog-dark', filter: 'url(#fogBlur)' }, layers.fog);
+    // Crisp hexes, not blurred blobs: unexplored land is an uncharted pattern, land out of sight is a dark wash.
+    // A frontier line marks where the charted map ends, and a fainter one where your sight ends.
+    const hex = (i, size) => { const [cx, cy] = center(s.W, i); return `M${pts(corners(cx, cy, size)).replace(/ /g, 'L')}Z`; };
+    const edgeOf = (i, k) => {
+      const [cx, cy] = center(s.W, i);
+      const cs = corners(cx, cy, HEX);
+      const [a, b] = [cs[k], cs[(k + 1) % 6]];
+      return `M${a[0].toFixed(1)},${a[1].toFixed(1)}L${b[0].toFixed(1)},${b[1].toFixed(1)}`;
+    };
+    let dimD = '';
+    let darkD = '';
+    let frontier = '';
+    let sight = '';
+    // Hexes on the rim also cover the strip between them and the map frame, so no sea shows through the zigzag.
+    const rim = (i) => {
+      const [cx, cy] = center(s.W, i);
+      const x = i % s.W;
+      const y = (i - x) / s.W;
+      const half = HEX * Math.sqrt(3) / 2 + 0.6;
+      const r = (x0, y0, x1, y1) => `M${x0.toFixed(1)},${y0.toFixed(1)}H${x1.toFixed(1)}V${y1.toFixed(1)}H${x0.toFixed(1)}Z`;
+      let d = '';
+      if (x === 0) d += r(0, cy - HEX, cx, cy + HEX);
+      if (x === s.W - 1) d += r(cx, cy - HEX, full[2], cy + HEX);
+      if (y === 0) d += r(cx - half, 0, cx + half, cy);
+      if (y === s.H - 1) d += r(cx - half, cy, cx + half, full[3]);
+      if (x === 0 && y === 0) d += r(0, 0, cx, cy);
+      if (x === 0 && y === s.H - 1) d += r(0, cy, cx, full[3]);
+      if (x === s.W - 1 && y === 0) d += r(cx, 0, full[2], cy);
+      if (x === s.W - 1 && y === s.H - 1) d += r(cx, cy, full[2], full[3]);
+      return d;
+    };
     for (let i = 0; i < s.tiles.length; i++) {
       if (key[i] === 'v') continue;
-      const [cx, cy] = center(s.W, i);
-      el('polygon', { points: pts(corners(cx, cy, HEX + 3)) }, key[i] === 'e' ? dim : dark);
+      if (key[i] === 'u') darkD += hex(i, HEX + 0.6) + rim(i);
+      else dimD += hex(i, HEX + 0.6) + rim(i);
+      for (let k = 0; k < 6; k++) {
+        const n = neighborDir(s.W, s.H, i, k);
+        if (n < 0) continue;
+        if (key[i] === 'u' && key[n] !== 'u') frontier += edgeOf(i, k);
+        else if (key[i] === 'e' && key[n] === 'v') sight += edgeOf(i, k);
+      }
     }
+    if (dimD) el('path', { d: dimD, class: 'fog-dim' }, layers.fog);
+    if (sight) el('path', { d: sight, class: 'fog-sight' }, layers.fog);
+    if (darkD) el('path', { d: darkD, class: 'fog-dark' }, layers.fog);
+    if (frontier) { el('path', { d: frontier, class: 'fog-edge-under' }, layers.fog); el('path', { d: frontier, class: 'fog-edge' }, layers.fog); }
   }
 
   const isFogged = (tile) => !!vis && !vis.tiles.has(tile);
@@ -577,7 +615,7 @@ export function createBoard(svg, handlers) {
   return {
     build, render, animateMove, animateAttack, float, pulse, showPath, setHover, shockwave, sparkle,
     zoomIn: () => zoomAt(null, null, 1.4), zoomOut: () => zoomAt(null, null, 1 / 1.4), resetView: () => { view = [...full]; applyView(); },
-    centerOn, zoomLevel, tileCenter: (t) => center(s.W, t), isFogged, isExplored,
+    centerOn, zoomLevel, tileCenter: (t) => center(s.W, t), isFogged, isExplored, terrain: () => terrainReady,
     zoomTo: (z, tile) => {
       const nz = Math.min(MAX_ZOOM, Math.max(1, z));
       const [x, y] = center(s.W, tile);

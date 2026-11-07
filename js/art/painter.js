@@ -68,7 +68,15 @@ function seedOf(s) {
 // ---------- main entry ----------
 const cache = new Map();
 
-export function paintTerrain(s, scale = 2.5) {
+// Pixels per map unit. The map is about 850 units wide; the game board is painted sharp enough to stay
+// crisp at full zoom on high-density screens, the start-screen preview much smaller.
+export function terrainScale(preview = false) {
+  if (preview) return 1.6;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  return dpr >= 1.5 ? 4 : 3;
+}
+
+export function paintTerrain(s, scale = terrainScale()) {
   const key = `${s.W}x${s.H}:${s.tiles.map((t) => t.t[0]).join('')}:${s.cities.map((c) => c.tile).join(',')}:${scale}`;
   if (cache.has(key)) return cache.get(key);
   const [mw, mh] = mapSize(s.W, s.H);
@@ -76,11 +84,12 @@ export function paintTerrain(s, scale = 2.5) {
   const H = Math.ceil(mh);
   const seed = seedOf(s);
 
-  // Field pass at 1 unit per pixel: blended land, height and colour.
-  const field = paintField(s, W, H, seed);
+  // Field pass at 1 unit per pixel: blended land, height, colour and coast. Fine texture is added after scaling.
+  const res = 1;
+  const field = paintField(s, W, H, seed, res);
   const small = document.createElement('canvas');
-  small.width = W;
-  small.height = H;
+  small.width = W * res;
+  small.height = H * res;
   small.getContext('2d').putImageData(field, 0, 0);
 
   const cv = document.createElement('canvas');
@@ -90,22 +99,65 @@ export function paintTerrain(s, scale = 2.5) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(small, 0, 0, cv.width, cv.height);
+  grain(ctx, cv.width, cv.height, seed);
   ctx.scale(scale, scale);
 
   drawDetails(ctx, s, seed);
 
-  // Gentle vignette so the map sits in the frame.
-  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
+  // A faint vignette so the map sits in its frame.
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.45, W / 2, H / 2, Math.max(W, H) * 0.75);
   g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, 'rgba(8,14,24,0.38)');
+  g.addColorStop(1, 'rgba(8,14,24,0.22)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
-  const url = cv.toDataURL('image/jpeg', 0.9);
-  const out = { url, width: W, height: H };
+  // Encode off the main thread. WebP keeps fine detail small; a browser that cannot encode it hands back PNG,
+  // which is huge for a painting, so use JPEG there.
+  const out = { url: null, width: W, height: H };
+  out.ready = encode(cv).then((url) => { out.url = url; return url; });
   cache.set(key, out);
-  if (cache.size > 6) cache.delete(cache.keys().next().value);
+  if (cache.size > 6) {
+    const old = cache.keys().next().value;
+    cache.get(old).ready.then((u) => { if (u.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(u), 5000); });
+    cache.delete(old);
+  }
   return out;
+}
+
+function encode(cv) {
+  const blob = (type, q) => new Promise((res) => (cv.toBlob ? cv.toBlob(res, type, q) : res(null)));
+  return blob('image/webp', 0.9)
+    .then((b) => (b && b.type === 'image/webp' ? b : blob('image/jpeg', 0.92)))
+    .then((b) => (b ? URL.createObjectURL(b) : cv.toDataURL('image/jpeg', 0.92)));
+}
+
+// A crisp paper-and-paint grain at the final resolution, so the ground stays textured however far you zoom.
+function grain(ctx, w, h, seed) {
+  const N = 160;
+  const t = document.createElement('canvas');
+  t.width = N;
+  t.height = N;
+  const tc = t.getContext('2d');
+  const img = tc.createImageData(N, N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      // Two scales of tileable hash noise: single pixels and small flecks.
+      const v = hash2(x, y, seed + 31) * 0.65 + hash2(x >> 1, y >> 1, seed + 37) * 0.35;
+      const g = 128 + (v - 0.5) * 110;
+      const j = (y * N + x) * 4;
+      img.data[j] = g;
+      img.data[j + 1] = g;
+      img.data[j + 2] = g;
+      img.data[j + 3] = 255;
+    }
+  }
+  tc.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = ctx.createPattern(t, 'repeat');
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
 function tileAt(s, col, row) {
@@ -113,12 +165,13 @@ function tileAt(s, col, row) {
   return s.tiles[row * s.W + col];
 }
 
-function paintField(s, W, H, seed) {
+function paintField(s, W, H, seed, res = 1) {
   const n = W * H;
   const land = new Float32Array(n);
   const hgt = new Float32Array(n);
   const col = new Float32Array(n * 3);
-  const sigma = HEX * 0.4;
+  // A tight blend: each hex reads as one terrain, with a short soft seam to its neighbours.
+  const sigma = HEX * 0.27;
   const inv = 1 / (2 * sigma * sigma);
   const rowH = HEX * 1.5;
   const colW = HEX * SQ3;
@@ -161,15 +214,33 @@ function paintField(s, W, H, seed) {
     }
   }
 
-  const img = new ImageData(W, H);
+  // Bilinear lookup into the 1-unit fields, so the finer pass has smooth inputs.
+  const sample = (arr, x, y, stride = 1, k = 0) => {
+    const x0 = Math.min(W - 1, Math.max(0, Math.floor(x)));
+    const y0 = Math.min(H - 1, Math.max(0, Math.floor(y)));
+    const x1 = Math.min(W - 1, x0 + 1);
+    const y1 = Math.min(H - 1, y0 + 1);
+    const fx = clamp(x - x0);
+    const fy = clamp(y - y0);
+    const a = arr[(y0 * W + x0) * stride + k];
+    const b = arr[(y0 * W + x1) * stride + k];
+    const c = arr[(y1 * W + x0) * stride + k];
+    const e = arr[(y1 * W + x1) * stride + k];
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + e) * fx * fy;
+  };
+  const RW = W * res;
+  const RH = H * res;
+  const img = new ImageData(RW, RH);
   const d = img.data;
   const lx = -0.62;
   const ly = -0.78;
-  for (let py = 0; py < H; py++) {
-    for (let px = 0; px < W; px++) {
-      const i = py * W + px;
-      const warp = (fbm(px / 26, py / 26, seed, 3) - 0.5) * 0.36 + (vnoise(px / 7, py / 7, seed + 5) - 0.5) * 0.08;
-      const L = land[i] + warp;
+  for (let qy = 0; qy < RH; qy++) {
+    for (let qx = 0; qx < RW; qx++) {
+      // Work in map units so the look is the same at any resolution.
+      const px = (qx + 0.5) / res - 0.5;
+      const py = (qy + 0.5) / res - 0.5;
+      const warp = (fbm(px / 26, py / 26, seed, 3) - 0.5) * 0.3 + (vnoise(px / 7, py / 7, seed + 5) - 0.5) * 0.07;
+      const L = sample(land, px, py) + warp;
       let c;
       if (L < 0.5) {
         // Water: deeper away from the shore, with soft swell bands.
@@ -182,28 +253,24 @@ function paintField(s, W, H, seed) {
         const ring = smooth(0.3, 0.36, L) * (1 - smooth(0.36, 0.42, L));
         c = mix(c, [150, 196, 206], ring * 0.35);
       } else {
-        c = [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]];
-        // Painterly variation: meadows, dry patches, fine grain.
-        const m = fbm(px / 34, py / 34, seed + 11, 4);
-        const fine = vnoise(px / 3.2, py / 3.2, seed + 13);
-        c = mix(c, [196, 190, 112], clamp((m - 0.55) * 1.6) * 0.45);
-        c = mix(c, [112, 150, 74], clamp((0.45 - m) * 1.6) * 0.4);
-        const k = 0.94 + fine * 0.12;
+        c = [sample(col, px, py, 3, 0), sample(col, px, py, 3, 1), sample(col, px, py, 3, 2)];
+        // Painterly variation, kept gentle so every hex of a kind looks alike: soft meadow patches and a fine grain.
+        const m = fbm(px / 30, py / 30, seed + 11, 4);
+        const fine = vnoise(px / 2.4, py / 2.4, seed + 13) * 0.6 + vnoise(px / 1.1, py / 1.1, seed + 17) * 0.4;
+        c = mix(c, [190, 186, 110], clamp((m - 0.58) * 1.6) * 0.22);
+        c = mix(c, [118, 152, 78], clamp((0.42 - m) * 1.6) * 0.22);
+        const k = 0.93 + fine * 0.14;
         c = [c[0] * k, c[1] * k, c[2] * k];
         // Hill shading from the blended height field.
-        const xl = px > 0 ? hgt[i - 1] : hgt[i];
-        const xr = px < W - 1 ? hgt[i + 1] : hgt[i];
-        const yu = py > 0 ? hgt[i - W] : hgt[i];
-        const yd = py < H - 1 ? hgt[i + W] : hgt[i];
-        const gx = (xr - xl) * 22;
-        const gy = (yd - yu) * 22;
-        const shade = clamp(1 - (gx * lx + gy * ly) * 1.1 - Math.hypot(gx, gy) * 0.15, 0.6, 1.3);
+        const gx = (sample(hgt, px + 1, py) - sample(hgt, px - 1, py)) * 22;
+        const gy = (sample(hgt, px, py + 1) - sample(hgt, px, py - 1)) * 22;
+        const shade = clamp(1 - (gx * lx + gy * ly) * 0.7 - Math.hypot(gx, gy) * 0.08, 0.78, 1.18);
         c = [c[0] * shade, c[1] * shade, c[2] * shade];
         // Beaches
         const beach = 1 - smooth(0.5, 0.56, L);
         c = mix(c, SAND, beach * 0.85);
       }
-      const j = i * 4;
+      const j = (qy * RW + qx) * 4;
       d[j] = c[0];
       d[j + 1] = c[1];
       d[j + 2] = c[2];
@@ -227,7 +294,7 @@ function drawDetails(ctx, s, seed) {
     const t = s.tiles[i].t;
     const [cx, cy] = center(s.W, i);
     if (t === 'forest') forestTile(sprites, s, i, cx, cy, seed);
-    else if (t === 'hills') hillTile(sprites, i, cx, cy, seed);
+    else if (t === 'hills') hillTile(sprites, i, cx, cy, seed, s.tiles[i].city >= 0 && s.cities[s.tiles[i].city].tile === i);
     else if (t === 'mountain') mountainTile(sprites, i, cx, cy, seed);
     else if (t === 'plains') {
       if (s.tiles[i].city >= 0 && s.cities[s.tiles[i].city].tile !== i) farm.push([i, cx, cy]);
@@ -238,13 +305,13 @@ function drawDetails(ctx, s, seed) {
   roads(ctx, s);
   for (const c of s.cities) {
     const [cx, cy] = center(s.W, c.tile);
-    const g = ctx.createRadialGradient(cx, cy + 4, 2, cx, cy + 4, 24);
-    g.addColorStop(0, 'rgba(176,150,104,0.85)');
-    g.addColorStop(1, 'rgba(176,150,104,0)');
-    ctx.fillStyle = g;
+    ctx.fillStyle = 'rgba(184,160,112,0.9)';
+    ctx.strokeStyle = 'rgba(96,74,40,0.45)';
+    ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.ellipse(cx, cy + 4, 26, 17, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy + 5, 21, 12, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
   }
   sprites.sort((a, b) => a.y - b.y);
   for (const sp of sprites) if (sp.shadow) sp.shadow(ctx);
@@ -255,14 +322,17 @@ function tree(sprites, x, y, sz, conifer, tint) {
   sprites.push({
     y,
     shadow: (ctx) => {
-      ctx.fillStyle = 'rgba(20,30,10,0.32)';
+      ctx.fillStyle = 'rgba(20,30,10,0.26)';
       ctx.beginPath();
-      ctx.ellipse(x + sz * 0.5, y + 0.6, sz * 0.95, sz * 0.38, 0, 0, Math.PI * 2);
+      ctx.ellipse(x + sz * 0.4, y + 0.5, sz * 0.75, sz * 0.3, 0, 0, Math.PI * 2);
       ctx.fill();
     },
     draw: (ctx) => {
       ctx.fillStyle = '#5a3d22';
       ctx.fillRect(x - 0.6, y - sz * 0.5, 1.2, sz * 0.55);
+      ctx.strokeStyle = 'rgba(18,34,16,0.7)';
+      ctx.lineWidth = 0.55;
+      ctx.lineJoin = 'round';
       if (conifer) {
         const dark = mix([34, 74, 46], tint, 0.15);
         const lite = mix([70, 118, 64], tint, 0.15);
@@ -284,6 +354,12 @@ function tree(sprites, x, y, sz, conifer, tint) {
           ctx.lineTo(x - w, base);
           ctx.closePath();
           ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x + w, base);
+          ctx.lineTo(x - w, base);
+          ctx.closePath();
+          ctx.stroke();
         }
       } else {
         const r = sz * 0.78;
@@ -292,6 +368,7 @@ function tree(sprites, x, y, sz, conifer, tint) {
         ctx.beginPath();
         ctx.arc(x, cy, r, 0, Math.PI * 2);
         ctx.arc(x + r * 0.55, cy + r * 0.3, r * 0.7, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.fill();
         ctx.fillStyle = rgb(mix([76, 126, 58], tint, 0.2));
         ctx.beginPath();
@@ -372,13 +449,14 @@ function plainsTile(sprites, s, i, cx, cy, seed) {
   });
 }
 
-function hillTile(sprites, i, cx, cy, seed) {
-  const n = 2 + (rnd(i, 1, seed) < 0.5 ? 1 : 0);
+function hillTile(sprites, i, cx, cy, seed, town = false) {
+  // A town on a hill keeps its centre clear: two smaller mounds sit at the back corners instead.
+  const n = town ? 2 : 2 + (rnd(i, 1, seed) < 0.5 ? 1 : 0);
   for (let k = 0; k < n; k++) {
-    const x = cx + (k - (n - 1) / 2) * 17 + (rnd(i, k + 10, seed) - 0.5) * 6;
-    const y = cy + (k % 2 ? 9 : -2) + (rnd(i, k + 20, seed) - 0.5) * 6;
-    const w = 13 + rnd(i, k + 30, seed) * 5;
-    const h = 9 + rnd(i, k + 40, seed) * 5;
+    const x = town ? cx + (k ? 19 : -19) : cx + (k - (n - 1) / 2) * 17 + (rnd(i, k + 10, seed) - 0.5) * 6;
+    const y = town ? cy - 9 + k * 3 : cy + (k % 2 ? 9 : -2) + (rnd(i, k + 20, seed) - 0.5) * 6;
+    const w = (13 + rnd(i, k + 30, seed) * 5) * (town ? 0.7 : 1);
+    const h = (9 + rnd(i, k + 40, seed) * 5) * (town ? 0.75 : 1);
     sprites.push({
       y,
       shadow: (ctx) => {
